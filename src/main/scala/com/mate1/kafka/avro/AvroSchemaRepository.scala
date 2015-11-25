@@ -15,12 +15,12 @@ object AvroSchemaRepository {
   private val instances = mutable.Map[String, AvroSchemaRepository]()
 
   def apply(url: String): AvroSchemaRepository = {
-    instances.get(url) match {
+    instances.get(url.trim) match {
       case Some(repo: AvroSchemaRepository) =>
         repo
       case _ =>
-        val repo = new AvroSchemaRepository(url)
-        instances.put(url, repo)
+        val repo = new AvroSchemaRepository(url.trim)
+        instances.put(url.trim, repo)
         repo
     }
   }

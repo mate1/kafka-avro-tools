@@ -2,8 +2,8 @@ package com.mate1.kafka.avro
 
 import java.util.concurrent.atomic.AtomicBoolean
 
-import com.typesafe.scalalogging.slf4j.LazyLogging
 import kafka.consumer.{Consumer, ConsumerConnector, ConsumerTimeoutException}
+import kafka.message.MessageAndMetadata
 import org.apache.avro.Schema
 import org.apache.avro.io.{BinaryDecoder, Decoder, DecoderFactory, JsonDecoder}
 import org.apache.avro.specific.{SpecificDatumReader, SpecificRecord}
@@ -18,7 +18,7 @@ import scala.util.{Success, Failure, Try}
   *
   * Created by Marc-Andre Lamothe on 2/24/15.
   */
-abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig, topic: String, message: T)(implicit tag: ClassTag[T]) extends Runnable with LazyLogging {
+abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig, topic: String, message: T)(implicit tag: ClassTag[T]) extends Runnable {
 
   /**
     * Whether this consumer thread is still running.
@@ -31,7 +31,7 @@ abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig
   private var consumer: ConsumerConnector = _
 
   /**
-    * Last used decoder, for each schema version.
+    * Avro Decoder for each schema version.
     */
   private val decoders = mutable.Map[Short, Decoder]()
 
@@ -60,24 +60,28 @@ abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig
   protected def consume(message: T): Unit
 
   /**
-    * @param data the data to decode
+    * @param kafkaMessage the message and metadata to decode
     * @return a MailMessage if decoded successfully, None otherwise
     */
-  private final def deserializeMessage(data: Array[Byte]): Option[T] = Try {
-    logger.debug(getClass.getSimpleName + " de-serializing message")
-
+  private final def deserializeMessage(kafkaMessage: MessageAndMetadata[Array[Byte], Array[Byte]]): Option[T] = Try {
     // Read the encoding and schema id
+    val data = kafkaMessage.message()
     val encoding = AvroEncoding(data(0))
     val schemaId = ((data(1) << 8) | (data(2) & 0xff)).toShort
 
     // Retrieve the writer's schema from the Avro schema repository
-    val schema = Try(AvroSchemaRepository(config.schema_repo_url.trim).getSchema(topic, schemaId).get) match {
-      case Success(schema: Schema) => schema
-      case Failure(e: Throwable) =>
-        if (config.schema_repo_url.trim.nonEmpty) {
-          logger.error(getClass.getSimpleName + s" failed to recover version $schemaId of schema for topic $topic from repository, proceeding with current schema version!")
-          logger.error("An exception occurred:", e)
+    val schema = config.schema_repo_url match {
+      case repoUrl: String if repoUrl.trim.nonEmpty =>
+        Try(AvroSchemaRepository(config.schema_repo_url).getSchema(topic, schemaId).get) match {
+          case Failure(e: Exception) =>
+            onSchemaRepoFailure(e)
+            message.getSchema
+          case Failure(e: Throwable) =>
+            throw e
+          case Success(schema: Schema) =>
+            schema
         }
+      case _ =>
         message.getSchema
     }
     reader.setSchema(schema)
@@ -101,7 +105,7 @@ abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig
     Some(reader.read(message, decoders(schemaId)))
   } match {
     case Failure(e: Exception) =>
-      logger.error("An exception occurred:", e)
+      onDecodingFailure(e, kafkaMessage)
       None
     case Failure(e: Throwable) =>
       throw e
@@ -125,6 +129,21 @@ abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig
   final def isActive: Boolean = active.get
 
   /**
+    * Method that gets called when an error occurs while consuming from Kafka.
+    */
+  protected def onConsumerFailure(e: Exception): Unit
+
+  /**
+    * Method that gets called when an error occurs while decoding a message.
+    */
+  protected def onDecodingFailure(e: Exception, message: MessageAndMetadata[Array[Byte], Array[Byte]]): Unit
+
+  /**
+    * Method that gets called when an error occurs while retrieving a schema from the repository.
+    */
+  protected def onSchemaRepoFailure(e: Exception): Unit
+
+  /**
     * Method that gets called when the consumer is starting.
     */
   protected def onStart(): Unit
@@ -145,8 +164,6 @@ abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig
   @Override
   final def run(): Unit = {
     Try {
-      logger.debug(getClass.getSimpleName + " initializing")
-
       // Initialize consumer
       consumer = Consumer.create(config)
 
@@ -158,14 +175,17 @@ abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig
       val iterator = consumer.createMessageStreams(Map(topic -> 1))(topic).head.iterator()
       while (iterator.hasNext()) {
         // Get the next message and de-serialize it
-        val message = deserializeMessage(iterator.next().message())
+        val message = deserializeMessage(iterator.next())
         if (message.isDefined)
           consume(message.get)
       }
     } match {
-      case Failure(e: Throwable) =>
+      case Failure(e: Exception) =>
         if (!e.isInstanceOf[ConsumerTimeoutException])
-          logger.error("An exception occurred:", e)
+          onConsumerFailure(e)
+        // Stop the consumer
+        stop()
+      case Failure(e: Throwable) =>
         // Stop the consumer
         stop()
       case _ =>
@@ -181,8 +201,6 @@ abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig
     */
   final def stop(): Unit = {
     if (!stopped.getAndSet(true)) {
-      logger.debug(getClass.getSimpleName + " stopping")
-
       onStop()
 
       if (active.get())

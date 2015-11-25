@@ -28,10 +28,8 @@ object Build extends Build {
     settings = super.settings ++ Seq(
       libraryDependencies ++= Seq(
         // General dependencies
-        "ch.qos.logback" % "logback-classic" % "1.1.3",
         "com.mate1.avro" %% "schema-repo-client" % "0.1-SNAPSHOT",
         "com.typesafe" % "config" % "1.2.1",
-        "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
         "org.apache.avro" % "avro" % "1.7.5",
         "org.apache.kafka" %% "kafka" % "0.8.1" exclude("javax.jms", "jms") exclude("com.sun.jdmk", "jmxtools") exclude("com.sun.jmx", "jmxri"),
 

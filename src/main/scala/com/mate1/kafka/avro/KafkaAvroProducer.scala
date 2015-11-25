@@ -3,7 +3,6 @@ package com.mate1.kafka.avro
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 
-import com.typesafe.scalalogging.slf4j.LazyLogging
 import kafka.producer.{KeyedMessage, Producer}
 import org.apache.avro.io.{BinaryEncoder, Encoder, EncoderFactory, JsonEncoder}
 import org.apache.avro.specific.{SpecificDatumWriter, SpecificRecord}
@@ -16,7 +15,7 @@ import scala.util.{Failure, Success, Try}
   *
   * Created by Marc-Andre Lamothe on 2/27/15.
   */
-class KafkaAvroProducer[T <: SpecificRecord](config: AvroProducerConfig, topic: String)(implicit tag: ClassTag[T]) extends LazyLogging {
+abstract class KafkaAvroProducer[T <: SpecificRecord](config: AvroProducerConfig, topic: String)(implicit tag: ClassTag[T]) {
 
   /**
     * Whether the producer was closed.
@@ -24,7 +23,7 @@ class KafkaAvroProducer[T <: SpecificRecord](config: AvroProducerConfig, topic: 
   private val closed = new AtomicBoolean(false)
 
   /**
-    * Last used encoder instance.
+    * Avro encoder.
     */
   private var encoder: Encoder = _
 
@@ -43,7 +42,8 @@ class KafkaAvroProducer[T <: SpecificRecord](config: AvroProducerConfig, topic: 
     */
   final def close(): Unit = {
     if (!closed.getAndSet(true)) {
-      logger.debug(getClass.getSimpleName + " closing")
+      onClose()
+
       if (producer.isDefined)
         producer.get.close()
       producer = None
@@ -56,26 +56,48 @@ class KafkaAvroProducer[T <: SpecificRecord](config: AvroProducerConfig, topic: 
   final def isClosed: Boolean = closed.get()
 
   /**
+    * Method that gets called when the producer is closed.
+    */
+  protected def onClose(): Unit
+
+  /**
+    * Method that gets called when an error occurs while decoding a message.
+    */
+  protected def onEncodingFailure(e: Exception, message: T): Unit
+
+  /**
+    * Method that gets called when an error occurs while retrieving a schema from the repository.
+    */
+  protected def onProducerFailure(e: Exception): Unit
+
+  /**
+    * Method that gets called when an error occurs while retrieving a schema from the repository.
+    */
+  protected def onSchemaRepoFailure(e: Exception): Unit
+
+  /**
     * Adds the specified message to the specified topic.
     * @param message the message to be published
     * @return true if the message was published successfully, false otherwise
     */
   final def publish(message: T): Boolean = Try {
     if (!closed.get()) {
-      logger.debug(getClass.getSimpleName + s" publishing message onto topic $topic")
-
       // Serialize and queue the message on the broker
-      if (producer.isEmpty)
-        producer = Some(new Producer[String, Array[Byte]](config))
-      producer.get.send(new KeyedMessage(topic, serializeMessage(message)))
-
-      true
+      val data = serializeMessage(message)
+      if (data.isDefined) {
+        if (producer.isEmpty)
+          producer = Some(new Producer[String, Array[Byte]](config))
+        producer.get.send(new KeyedMessage(topic, data.get))
+        true
+      }
+      else
+        false
     }
     else
       false
   } match {
     case Failure(e: Exception) =>
-      logger.error("An exception occurred:", e)
+      onProducerFailure(e)
       if (producer.isDefined)
         producer.get.close()
       producer = None
@@ -90,9 +112,7 @@ class KafkaAvroProducer[T <: SpecificRecord](config: AvroProducerConfig, topic: 
     * @param message the message to be published
     * @return a byte array containing the serialized message
     */
-  private final def serializeMessage(message: T): Array[Byte] = {
-    logger.debug(getClass.getSimpleName + " serializing message")
-
+  private final def serializeMessage(message: T): Option[Array[Byte]] = Try {
     // Configure encoder
     val out = new ByteArrayOutputStream()
     encoder match {
@@ -110,13 +130,18 @@ class KafkaAvroProducer[T <: SpecificRecord](config: AvroProducerConfig, topic: 
     }
 
     // Try to retrieve the schema's version from the repository
-    val schemaId = Try(AvroSchemaRepository(config.schema_repo_url.trim).getSchemaId(topic, message.getSchema).get) match {
-      case Success(version: Short) => version
-      case Failure(e: Throwable) =>
-        if (config.schema_repo_url.trim.nonEmpty) {
-          logger.error(getClass.getSimpleName + s" failed to recover schema id for topic $topic from repository, proceeding with default schema id!")
-          logger.error("An exception occurred:", e)
+    val schemaId = config.schema_repo_url match {
+      case repoUrl: String if repoUrl.trim.nonEmpty =>
+        Try(AvroSchemaRepository(config.schema_repo_url).getSchemaId(topic, message.getSchema).get) match {
+          case Failure(e: Exception) =>
+            onSchemaRepoFailure(e)
+            config.default_schema_id
+          case Failure(e: Throwable) =>
+            throw e
+          case Success(id: Short) =>
+            id
         }
+      case _ =>
         config.default_schema_id
     }
 
@@ -129,7 +154,15 @@ class KafkaAvroProducer[T <: SpecificRecord](config: AvroProducerConfig, topic: 
     writer.write(message, encoder)
     encoder.flush()
 
-    out.toByteArray
+    Some(out.toByteArray)
+  } match {
+    case Failure(e: Exception) =>
+      onEncodingFailure(e, message)
+      None
+    case Failure(e: Throwable) =>
+      throw e
+    case Success(result: Option[Array[Byte]]) =>
+      result
   }
 
 }
