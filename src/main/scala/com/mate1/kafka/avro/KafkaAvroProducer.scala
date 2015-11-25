@@ -53,7 +53,7 @@ class KafkaAvroProducer[T <: SpecificRecord](config: AvroProducerConfig, topic: 
   /**
     * Whether the producer is closed.
     */
-  def isClosed: Boolean = closed.get()
+  final def isClosed: Boolean = closed.get()
 
   /**
     * Adds the specified message to the specified topic.

@@ -48,8 +48,8 @@ abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig
   /**
     * Commits the offset the last message consumed from the the queue.
     */
-  protected def commitOffsets(): Unit = {
-    if (!stopped.get() && active.get())
+  protected final def commitOffsets(): Unit = {
+    if (!stopped.get && active.get())
       consumer.commitOffsets
   }
 
@@ -85,15 +85,15 @@ abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig
     // Decoder configuration
     decoders.get(schemaId) match {
       case Some(oldDecoder: BinaryDecoder) =>
-        decoders.put(schemaId, DecoderFactory.get().binaryDecoder(data, 3, data.length - 3, oldDecoder))
+        decoders.put(schemaId, DecoderFactory.get.binaryDecoder(data, 3, data.length - 3, oldDecoder))
       case Some(oldDecoder: JsonDecoder) =>
         decoders.put(schemaId, oldDecoder.configure(new String(data, 3, data.length - 3, "UTF-8")))
       case _ =>
         encoding match {
           case AvroEncoding.Binary =>
-            decoders.put(schemaId, DecoderFactory.get().binaryDecoder(data, 3, data.length - 3, null))
+            decoders.put(schemaId, DecoderFactory.get.binaryDecoder(data, 3, data.length - 3, null))
           case AvroEncoding.JSON =>
-            decoders.put(schemaId, DecoderFactory.get().jsonDecoder(schema, new String(data, 3, data.length - 3, "UTF-8")))
+            decoders.put(schemaId, DecoderFactory.get.jsonDecoder(schema, new String(data, 3, data.length - 3, "UTF-8")))
         }
     }
 
@@ -122,7 +122,7 @@ abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig
   /**
     * @return whether this consumer is still active or not
     */
-  def isActive: Boolean = active.get()
+  final def isActive: Boolean = active.get
 
   /**
     * Method that gets called when the consumer is starting.
@@ -195,7 +195,7 @@ abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig
     */
   @tailrec
   final def waitUntilStopped(): Unit = {
-    if (stopped.get() && active.get()) {
+    if (stopped.get && active.get) {
       Try(Thread.sleep(100))
       waitUntilStopped()
     }
