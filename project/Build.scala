@@ -5,7 +5,7 @@ object Build extends Build {
 
   // Global build settings
   override lazy val settings = super.settings ++ Seq(
-    name         := "KafkaAvroUtils",
+    name         := "KafkaAvroTools",
     version      := "1.0.0",
     organization := "com.mate1",
     scalaVersion := "2.10.4",
@@ -24,7 +24,7 @@ object Build extends Build {
   )
 
   // Scalamail project
-  lazy val kafkaAvroUtils = Project("kafka-avro-utils", file("."),
+  lazy val kafkaAvroUtils = Project("kafka-avro-tools", file("."),
     settings = super.settings ++ Seq(
       libraryDependencies ++= Seq(
         // General dependencies
