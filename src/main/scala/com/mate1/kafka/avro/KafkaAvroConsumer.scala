@@ -120,6 +120,13 @@ abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig
   }
 
   /**
+   * Starts the consumer on a new thread.
+   */
+  final def start(): Unit = {
+    new Thread(this).start()
+  }
+
+  /**
     * Stops the consumer.
     */
   final def stop(): Unit = {
