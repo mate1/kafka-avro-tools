@@ -3,22 +3,19 @@ package com.mate1.kafka.avro
 import java.util.concurrent.atomic.AtomicBoolean
 
 import kafka.consumer.{Consumer, ConsumerConnector, ConsumerTimeoutException}
-import kafka.message.MessageAndMetadata
-import org.apache.avro.Schema
-import org.apache.avro.io.{BinaryDecoder, Decoder, DecoderFactory, JsonDecoder}
-import org.apache.avro.specific.{SpecificDatumReader, SpecificRecord}
+import org.apache.avro.specific.SpecificRecord
 
 import scala.annotation.tailrec
-import scala.collection.mutable
 import scala.reflect.ClassTag
-import scala.util.{Success, Failure, Try}
+import scala.util.{Failure, Try}
 
 /**
   * Class that reads and decodes Avro messages from a Kafka queue.
   *
   * Created by Marc-Andre Lamothe on 2/24/15.
   */
-abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig, topic: String, message: T)(implicit tag: ClassTag[T]) extends Runnable {
+abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig, topic: String, message: T)(implicit tag: ClassTag[T])
+  extends AvroDecoder[T](config.schema_repo_url, topic) with Runnable {
 
   /**
     * Whether this consumer thread is still running.
@@ -29,16 +26,6 @@ abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig
     * Kafka consumer connector.
     */
   private var consumer: ConsumerConnector = _
-
-  /**
-    * Avro Decoder for each schema version.
-    */
-  private val decoders = mutable.Map[Short, Decoder]()
-
-  /**
-    * The Avro message reader.
-    */
-  private val reader = new SpecificDatumReader[T](tag.runtimeClass.asInstanceOf[Class[T]])
 
   /**
     * Whether this consumer was stopped.
@@ -60,60 +47,6 @@ abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig
   protected def consume(message: T): Unit
 
   /**
-    * @param kafkaMessage the message and metadata to decode
-    * @return a MailMessage if decoded successfully, None otherwise
-    */
-  private final def deserializeMessage(kafkaMessage: MessageAndMetadata[Array[Byte], Array[Byte]]): Option[T] = Try {
-    // Read the encoding and schema id
-    val data = kafkaMessage.message()
-    val encoding = AvroEncoding(data(0))
-    val schemaId = ((data(1) << 8) | (data(2) & 0xff)).toShort
-
-    // Retrieve the writer's schema from the Avro schema repository
-    val schema = config.schema_repo_url match {
-      case repoUrl: String if repoUrl.trim.nonEmpty =>
-        Try(AvroSchemaRepository(config.schema_repo_url).getSchema(topic, schemaId).get) match {
-          case Failure(e: Exception) =>
-            onSchemaRepoFailure(e)
-            message.getSchema
-          case Failure(e: Throwable) =>
-            throw e
-          case Success(schema: Schema) =>
-            schema
-        }
-      case _ =>
-        message.getSchema
-    }
-    reader.setSchema(schema)
-
-    // Decoder configuration
-    decoders.get(schemaId) match {
-      case Some(oldDecoder: BinaryDecoder) =>
-        decoders.put(schemaId, DecoderFactory.get.binaryDecoder(data, 3, data.length - 3, oldDecoder))
-      case Some(oldDecoder: JsonDecoder) =>
-        decoders.put(schemaId, oldDecoder.configure(new String(data, 3, data.length - 3, "UTF-8")))
-      case _ =>
-        encoding match {
-          case AvroEncoding.Binary =>
-            decoders.put(schemaId, DecoderFactory.get.binaryDecoder(data, 3, data.length - 3, null))
-          case AvroEncoding.JSON =>
-            decoders.put(schemaId, DecoderFactory.get.jsonDecoder(schema, new String(data, 3, data.length - 3, "UTF-8")))
-        }
-    }
-
-    // Decode the message
-    Some(reader.read(message, decoders(schemaId)))
-  } match {
-    case Failure(e: Exception) =>
-      onDecodingFailure(e, kafkaMessage)
-      None
-    case Failure(e: Throwable) =>
-      throw e
-    case Success(result: Option[T]) =>
-      result
-  }
-
-  /**
     * @return the group used by this consumer
     */
   final def getGroup: String = config.groupId
@@ -132,16 +65,6 @@ abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig
     * Method that gets called when an error occurs while consuming from Kafka.
     */
   protected def onConsumerFailure(e: Exception): Unit
-
-  /**
-    * Method that gets called when an error occurs while decoding a message.
-    */
-  protected def onDecodingFailure(e: Exception, message: MessageAndMetadata[Array[Byte], Array[Byte]]): Unit
-
-  /**
-    * Method that gets called when an error occurs while retrieving a schema from the repository.
-    */
-  protected def onSchemaRepoFailure(e: Exception): Unit
 
   /**
     * Method that gets called when the consumer is starting.
@@ -175,9 +98,9 @@ abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig
       val iterator = consumer.createMessageStreams(Map(topic -> 1))(topic).head.iterator()
       while (iterator.hasNext()) {
         // Get the next message and de-serialize it
-        val message = deserializeMessage(iterator.next())
-        if (message.isDefined)
-          consume(message.get)
+        val msg = deserializeMessage(iterator.next(), message)
+        if (msg.isDefined)
+          consume(msg.get)
       }
     } match {
       case Failure(e: Exception) =>

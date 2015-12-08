@@ -1,5 +1,6 @@
 import sbt._
 import sbt.Keys._
+import sbtavro.SbtAvro._
 
 object Build extends Build {
 
@@ -34,8 +35,14 @@ object Build extends Build {
         "org.apache.kafka" %% "kafka" % "0.8.1" exclude("javax.jms", "jms") exclude("com.sun.jdmk", "jmxtools") exclude("com.sun.jmx", "jmxri"),
 
         // Test dependencies
+        "commons-io" % "commons-io" % "2.4" % Test,
         "org.scalatest" %% "scalatest" % "2.2.1" % Test
       )
+    )
+
+    // Avro compiler settings
+    ++ avroSettings ++ Seq(
+      sourceDirectory in avroConfig <<= (sourceDirectory in Test)(_ / "resources/avro")
     )
   )
   .settings(net.virtualvoid.sbt.graph.Plugin.graphSettings: _*)
