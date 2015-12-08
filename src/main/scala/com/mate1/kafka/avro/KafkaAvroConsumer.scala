@@ -6,6 +6,7 @@ import kafka.consumer.{Consumer, ConsumerConnector, ConsumerTimeoutException}
 import org.apache.avro.specific.SpecificRecord
 
 import scala.annotation.tailrec
+import scala.collection.mutable
 import scala.reflect.ClassTag
 import scala.util.{Failure, Try}
 
@@ -23,6 +24,16 @@ abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig
   private val active = new AtomicBoolean(false)
 
   /**
+   * Batch of events
+   */
+  private val batch = mutable.ListBuffer[T]()
+
+  /**
+   * Number of event to be batched
+   */
+  private val batchSize = config.batch_size
+  
+  /**
     * Kafka consumer connector.
     */
   private var consumer: ConsumerConnector = _
@@ -31,6 +42,17 @@ abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig
     * Whether this consumer was stopped.
     */
   private val stopped = new AtomicBoolean(false)
+
+  /**
+   * Batches the events until they reach the proper size = batchSize
+   */
+  private def addToBatch(msg:T): Unit = {
+    batch += msg
+    if(batch.size >= batchSize) {
+      consume(batch)
+      batch.clear()
+    }
+  }
 
   /**
     * Commits the offset the last message consumed from the the queue.
@@ -44,7 +66,7 @@ abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig
     * Method that gets called each time a new message is ready for processing.
     * @param message the message to process
     */
-  protected def consume(message: T): Unit
+  protected def consume(message: Seq[T]): Unit
 
   /**
     * @return the group used by this consumer
@@ -100,7 +122,8 @@ abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig
         // Get the next message and de-serialize it
         val msg = deserializeMessage(iterator.next(), message)
         if (msg.isDefined)
-          consume(msg.get)
+          addToBatch(msg.get)
+
       }
     } match {
       case Failure(e: Exception) =>

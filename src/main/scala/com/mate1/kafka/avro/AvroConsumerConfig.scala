@@ -12,12 +12,13 @@ import scala.util.Try
 /**
   * Created by Marc-Andre Lamothe on 3/26/15.
   */
-case class AvroConsumerConfig(schema_repo_url: String)(implicit props: Properties) extends ConsumerConfig(props)
+case class AvroConsumerConfig(schema_repo_url: String, batch_size: Int)(implicit props: Properties) extends ConsumerConfig(props)
 
 object AvroConsumerConfig {
   final def apply(config: Config): AvroConsumerConfig = {
     // Read Avro consumer specific config
     val schema_repo_url = Try(config.getString("avro.schema_repo_url")).getOrElse("")
+    val batch_size = Try(config.getInt("avro.batch_size")).getOrElse(1)
 
     // Generate Kafka consumer config
     implicit val props = new Properties()
@@ -27,6 +28,6 @@ object AvroConsumerConfig {
     }
 
     // Generate Avro consumer config
-    AvroConsumerConfig(schema_repo_url)
+    AvroConsumerConfig(schema_repo_url, batch_size)
   }
 }
