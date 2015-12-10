@@ -5,6 +5,7 @@ import kafka.consumer.Consumer
 
 import scala.compat.Platform
 import scala.concurrent.duration._
+import scala.language.postfixOps
 import scala.util.Random
 
 /**
@@ -47,7 +48,8 @@ class KafkaAvroProducerSpec extends UnitSpec with Zookeeper with Kafka with Conf
 
     wait(1 seconds)
 
-    val iterator = Consumer.create(AvroConsumerConfig(config.getConfig("consumer"))).createMessageStreams(Map(topic -> 1))(topic).head.iterator()
+    val conf = AvroConsumerConfig(config.getConfig("consumer")).generateConsumerConfig()
+    val iterator = Consumer.create(conf).createMessageStreams(Map(topic -> 1))(topic).head.iterator()
     val data = iterator.next().message()
     //println(data.map("%02X" format _).mkString)
 

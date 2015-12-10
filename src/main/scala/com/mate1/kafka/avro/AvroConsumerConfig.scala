@@ -6,28 +6,33 @@ import java.util.Properties
 import com.typesafe.config.{ConfigValue, Config}
 import kafka.consumer.ConsumerConfig
 
-import scala.collection.JavaConversions._
+import scala.collection.JavaConverters._
 import scala.util.Try
 
 /**
   * Created by Marc-Andre Lamothe on 3/26/15.
   */
-case class AvroConsumerConfig(schema_repo_url: String, batch_size: Int)(implicit props: Properties) extends ConsumerConfig(props)
-
-object AvroConsumerConfig {
-  final def apply(config: Config): AvroConsumerConfig = {
-    // Read Avro consumer specific config
-    val schema_repo_url = Try(config.getString("avro.schema_repo_url")).getOrElse("")
-    val batch_size = Try(config.getInt("avro.batch_size")).getOrElse(1)
+case class AvroConsumerConfig private (schema_repo_url: String)(private val conf: Config) {
+  final def generateConsumerConfig(overrides: Option[Config] = None): ConsumerConfig = {
+    // Apply overrides to config, if any
+    val config = overrides.map(_.withFallback(conf)).getOrElse(conf)
 
     // Generate Kafka consumer config
-    implicit val props = new Properties()
-    for (entry: Entry[String, ConfigValue] <- config.entrySet) {
+    val props = new Properties()
+    for (entry: Entry[String, ConfigValue] <- config.entrySet.asScala) {
       if (!entry.getKey.startsWith("avro"))
         props.put(entry.getKey, entry.getValue.unwrapped.toString)
     }
+    new ConsumerConfig(props)
+  }
+}
+
+object AvroConsumerConfig {
+  final def apply(conf: Config): AvroConsumerConfig = {
+    // Read Avro consumer specific config
+    val schema_repo_url = Try(conf.getString("avro.schema_repo_url")).getOrElse("")
 
     // Generate Avro consumer config
-    AvroConsumerConfig(schema_repo_url, batch_size)
+    AvroConsumerConfig(schema_repo_url)(conf)
   }
 }
