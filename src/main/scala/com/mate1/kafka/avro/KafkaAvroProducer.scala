@@ -27,6 +27,11 @@ abstract class KafkaAvroProducer[T <: SpecificRecord](config: AvroProducerConfig
   private var producer: Option[Producer[String, Array[Byte]]] = None
 
   /**
+    * Kafka producer config.
+    */
+  private val producerConfig = config.generateProducerConfig()
+
+  /**
     * Close this producer, preventing further messages from being published.
     */
   final def close(): Unit = {
@@ -65,7 +70,7 @@ abstract class KafkaAvroProducer[T <: SpecificRecord](config: AvroProducerConfig
       val data = serializeMessage(message)
       if (data.isDefined) {
         if (producer.isEmpty)
-          producer = Some(new Producer[String, Array[Byte]](config))
+          producer = Some(new Producer[String, Array[Byte]](producerConfig))
         producer.get.send(new KeyedMessage(topic, data.get))
         true
       }

@@ -3,7 +3,7 @@ package com.mate1.kafka.avro
 import java.util.Map.Entry
 import java.util.Properties
 
-import com.typesafe.config.{ConfigValue, Config}
+import com.typesafe.config.{Config, ConfigValue}
 import kafka.consumer.ConsumerConfig
 
 import scala.collection.JavaConverters._
@@ -33,6 +33,6 @@ object AvroConsumerConfig {
     val schema_repo_url = Try(conf.getString("avro.schema_repo_url")).getOrElse("")
 
     // Generate Avro consumer config
-    AvroConsumerConfig(schema_repo_url)(conf)
+    new AvroConsumerConfig(schema_repo_url)(conf)
   }
 }
