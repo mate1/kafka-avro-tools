@@ -9,6 +9,8 @@ import org.apache.avro.specific.SpecificRecord
 import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.collection.JavaConverters._
+import scala.compat.Platform
+import scala.concurrent.duration.Duration
 import scala.reflect.ClassTag
 import scala.util.{Failure, Try}
 
@@ -17,13 +19,13 @@ import scala.util.{Failure, Try}
   *
   * Created by Marc-Andre Lamothe on 2/24/15.
   */
-abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerConfig, topic: String, message: T, batchSize: Short)(implicit tag: ClassTag[T])
+abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerConfig, topic: String, messages: Seq[T], timeout: Duration)(implicit tag: ClassTag[T])
   extends AvroDecoder[T](config.schema_repo_url, topic) with Runnable {
 
   /**
     * Whether this consumer thread is still running.
     */
-  private val active = new AtomicBoolean(false)
+  private val active = new AtomicBoolean( false)
 
   /**
    * Batch of events
@@ -40,8 +42,22 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
     */
   private val consumerConfig = config.generateConsumerConfig(Some(ConfigFactory.parseMap(Seq[(String,String)](
     // Force disable auto commit if batch size is greater than 1, because we will manually commit after each batch
-    if (batchSize > 1) "auto.commit.enable" -> "false" else null
+    if (messages.size > 1)
+      "auto.commit.enable" -> "false"
+    else
+      null
+    ,
+    // Force consumer timeout if batch size is greater than 1, because we want the stream iterator to timeout periodically to check the time since last consume
+    if (messages.size > 1 && Try(config.conf.getString("consumer.timeout.ms").toLong).filter(value => value > 0).isFailure)
+      "consumer.timeout.ms" -> Math.max(timeout.toMillis/10,200).toString
+    else
+      null
   ).toMap.asJava)))
+
+  /**
+    * Time when we last called consume.
+    */
+  private var lastConsumedTime = 0L
 
   /**
     * Whether this consumer was stopped.
@@ -112,17 +128,31 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
 
       // Initialize message iterator
       val iterator = consumer.createMessageStreams(Map(topic -> 1))(topic).head.iterator()
-      while (iterator.hasNext()) {
+      lastConsumedTime = Platform.currentTime
+      while (true) {
         // Get the next message and de-serialize it
-        val msg = deserializeMessage(iterator.next(), message)
-        if (msg.isDefined) {
-          batch += msg.get
-          if (batch.size >= batchSize) {
+        Try {
+          if (iterator.hasNext()) {
+            val msg = deserializeMessage(iterator.next(), messages(batch.size))
+            if (msg.isDefined)
+              batch += msg.get
+          }
+        } match {
+          case Failure(e: ConsumerTimeoutException) if messages.size > 1 =>
+            // Ignore consumer timeouts while batching
+          case Failure(e: Throwable) =>
+            throw e
+          case _ =>
+        }
+
+        if (batch.size >= messages.size || Platform.currentTime - lastConsumedTime > timeout.toMillis) {
+          if (batch.nonEmpty) {
             consume(batch)
-            if (batchSize > 1)
+            if (messages.size > 1)
               commitOffsets()
             batch.clear()
           }
+          lastConsumedTime = Platform.currentTime
         }
       }
     } match {

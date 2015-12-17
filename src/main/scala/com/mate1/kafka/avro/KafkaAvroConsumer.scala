@@ -2,6 +2,8 @@ package com.mate1.kafka.avro
 
 import org.apache.avro.specific.SpecificRecord
 
+import scala.concurrent.duration._
+import scala.language.postfixOps
 import scala.reflect.ClassTag
 
 /**
@@ -10,7 +12,7 @@ import scala.reflect.ClassTag
   * Created by Marc-Andre Lamothe on 2/24/15.
   */
 abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig, topic: String, message: T)(implicit tag: ClassTag[T])
-  extends KafkaAvroBatchConsumer[T](config, topic, message, 1) {
+  extends KafkaAvroBatchConsumer[T](config, topic, Seq(message), 0 millisecond) {
 
   /**
     * Method that gets called each time a new message is ready for processing.

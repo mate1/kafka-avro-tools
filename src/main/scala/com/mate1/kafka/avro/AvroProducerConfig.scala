@@ -12,7 +12,7 @@ import scala.util.Try
 /**
   * Created by Marc-Andre Lamothe on 3/26/15.
   */
-case class AvroProducerConfig private (default_schema_id: Short, encoding: AvroEncoding.Value, schema_repo_url: String)(private val conf: Config) {
+case class AvroProducerConfig private(conf: Config, default_schema_id: Short, encoding: AvroEncoding.Value, schema_repo_url: String) {
   final def generateProducerConfig(overrides: Option[Config] = None): ProducerConfig = {
     // Apply overrides to config, if any
     val config = overrides.map(_.withFallback(conf)).getOrElse(conf)
@@ -35,6 +35,6 @@ object AvroProducerConfig {
     val schema_repo_url = Try(conf.getString("avro.schema_repo_url")).getOrElse("")
 
     // Generate Avro producer config
-    new AvroProducerConfig(default_schema_id, encoding, schema_repo_url)(conf)
+    new AvroProducerConfig(conf, default_schema_id, encoding, schema_repo_url)
   }
 }

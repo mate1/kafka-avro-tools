@@ -12,7 +12,7 @@ import scala.util.Try
 /**
   * Created by Marc-Andre Lamothe on 3/26/15.
   */
-case class AvroConsumerConfig private (schema_repo_url: String)(private val conf: Config) {
+case class AvroConsumerConfig private (conf: Config, schema_repo_url: String) {
   final def generateConsumerConfig(overrides: Option[Config] = None): ConsumerConfig = {
     // Apply overrides to config, if any
     val config = overrides.map(_.withFallback(conf)).getOrElse(conf)
@@ -33,6 +33,6 @@ object AvroConsumerConfig {
     val schema_repo_url = Try(conf.getString("avro.schema_repo_url")).getOrElse("")
 
     // Generate Avro consumer config
-    new AvroConsumerConfig(schema_repo_url)(conf)
+    new AvroConsumerConfig(conf, schema_repo_url)
   }
 }
