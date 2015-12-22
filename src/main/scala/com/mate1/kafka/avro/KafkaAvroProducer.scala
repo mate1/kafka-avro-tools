@@ -29,7 +29,7 @@ abstract class KafkaAvroProducer[T <: SpecificRecord](config: AvroProducerConfig
   /**
     * Kafka producer config.
     */
-  private val producerConfig = config.generateProducerConfig()
+  private val producerConfig = config.kafkaProducerConfig()
 
   /**
     * Close this producer, preventing further messages from being published.

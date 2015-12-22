@@ -3,7 +3,7 @@ package com.mate1.kafka.avro
 import java.util.Map.Entry
 import java.util.Properties
 
-import com.typesafe.config.{Config, ConfigValue}
+import com.typesafe.config.{Config, ConfigFactory, ConfigValue}
 import kafka.consumer.ConsumerConfig
 
 import scala.collection.JavaConverters._
@@ -13,9 +13,9 @@ import scala.util.Try
   * Created by Marc-Andre Lamothe on 3/26/15.
   */
 case class AvroConsumerConfig private (conf: Config, schema_repo_url: String) {
-  final def generateConsumerConfig(overrides: Option[Config] = None): ConsumerConfig = {
+  final def kafkaConsumerConfig(overrides: Map[String,String] = Map.empty[String,String]): ConsumerConfig = {
     // Apply overrides to config, if any
-    val config = overrides.map(_.withFallback(conf)).getOrElse(conf)
+    val config = if (overrides.nonEmpty) ConfigFactory.parseMap(overrides.asJava).withFallback(conf) else conf
 
     // Generate Kafka consumer config
     val props = new Properties()

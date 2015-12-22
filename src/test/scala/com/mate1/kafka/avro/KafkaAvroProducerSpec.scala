@@ -48,7 +48,7 @@ class KafkaAvroProducerSpec extends UnitSpec with Zookeeper with Kafka with Conf
 
     wait(1 seconds)
 
-    val conf = AvroConsumerConfig(config.getConfig("consumer")).generateConsumerConfig()
+    val conf = AvroConsumerConfig(config.getConfig("consumer")).kafkaConsumerConfig()
     val iterator = Consumer.create(conf).createMessageStreams(Map(topic -> 1))(topic).head.iterator()
     val data = iterator.next().message()
     //println(data.map("%02X" format _).mkString)

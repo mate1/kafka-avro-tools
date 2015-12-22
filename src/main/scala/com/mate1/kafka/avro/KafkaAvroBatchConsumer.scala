@@ -25,12 +25,17 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
   /**
     * Whether this consumer thread is still running.
     */
-  private val active = new AtomicBoolean( false)
+  private val active = new AtomicBoolean(false)
 
   /**
-   * Batch of events
+   * List of messages in the current batch.
    */
   private val batch = mutable.ListBuffer[T]()
+
+  /**
+    * Timestamp of when the current batch was started.
+    */
+  private var batchTimestamp = 0L
 
   /**
     * Kafka consumer connector.
@@ -40,7 +45,7 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
   /**
     * Kafka consumer config.
     */
-  private val consumerConfig = config.generateConsumerConfig(Some(ConfigFactory.parseMap(Seq[(String,String)](
+  private val consumerConfig = config.kafkaConsumerConfig(Seq[(String,String)](
     // Force disable auto commit if batch size is greater than 1, because we will manually commit after each batch
     if (messages.size > 1)
       "auto.commit.enable" -> "false"
@@ -48,16 +53,11 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
       null
     ,
     // Force consumer timeout if batch size is greater than 1, because we want the stream iterator to timeout periodically to check the time since last consume
-    if (messages.size > 1 && Try(config.conf.getString("consumer.timeout.ms").toLong).filter(value => value > 0).isFailure)
+    if (messages.size > 1 && Try(config.conf.getString("consumer.timeout.ms").toLong).filter(_ > 0).isFailure)
       "consumer.timeout.ms" -> Math.max(timeout.toMillis/10,200).toString
     else
       null
-  ).toMap.asJava)))
-
-  /**
-    * Time when we last called consume.
-    */
-  private var lastConsumedTime = 0L
+  ).filter(_ != null).toMap)
 
   /**
     * Whether this consumer was stopped.
@@ -128,15 +128,16 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
 
       // Initialize message iterator
       val iterator = consumer.createMessageStreams(Map(topic -> 1))(topic).head.iterator()
-      lastConsumedTime = Platform.currentTime
+      batchTimestamp = Platform.currentTime
       while (true) {
         // Get the next message and de-serialize it
         Try {
-          if (iterator.hasNext()) {
-            val msg = deserializeMessage(iterator.next(), messages(batch.size))
-            if (msg.isDefined)
-              batch += msg.get
-          }
+          if (iterator.hasNext())
+            deserializeMessage(iterator.next(), messages(batch.size)) match {
+              case Some(msg: T) =>
+                batch += msg
+              case _ =>
+            }
         } match {
           case Failure(e: ConsumerTimeoutException) if messages.size > 1 =>
             // Ignore consumer timeouts while batching
@@ -145,14 +146,14 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
           case _ =>
         }
 
-        if (batch.size >= messages.size || Platform.currentTime - lastConsumedTime > timeout.toMillis) {
+        if (batch.size >= messages.size || Platform.currentTime - batchTimestamp > timeout.toMillis) {
           if (batch.nonEmpty) {
             consume(batch)
             if (messages.size > 1)
               commitOffsets()
             batch.clear()
           }
-          lastConsumedTime = Platform.currentTime
+          batchTimestamp = Platform.currentTime
         }
       }
     } match {
