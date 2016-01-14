@@ -1,3 +1,21 @@
+/*
+   Copyright 2015 Mate1 inc.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+   Created by Marc-André Lamothe on 2/24/15.
+*/
+
 package com.mate1.kafka.avro
 
 import kafka.message.MessageAndMetadata
@@ -10,26 +28,26 @@ import scala.reflect.ClassTag
 import scala.util.{Failure, Success, Try}
 
 /**
-  * Class that reads and decodes Avro messages from a Kafka queue.
-  *
-  * Created by Marc-Andre Lamothe on 2/24/15.
-  */
+ * Abstract class that provides Kafka message to Avro message decoding functionality.
+ */
 abstract class AvroDecoder[T <: SpecificRecord](schema_repo_url: String, topic: String)(implicit tag: ClassTag[T]) {
 
   /**
-    * Avro Decoder for each schema version.
-    */
+   * Avro Decoder for each schema version.
+   */
   private val decoders = mutable.Map[Short, Decoder]()
 
   /**
-    * The Avro message reader.
-    */
+   * The Avro message reader.
+   */
   private val reader = new SpecificDatumReader[T](tag.runtimeClass.asInstanceOf[Class[T]])
 
   /**
-    * @param kafkaMessage the message and metadata to decode
-    * @return a MailMessage if decoded successfully, None otherwise
-    */
+   * Deserializes the binary data from a Kafka message into an Avro message.
+   *
+   * @param kafkaMessage the message and metadata to decode
+   * @return a MailMessage if decoded successfully, None otherwise
+   */
   protected final def deserializeMessage(kafkaMessage: MessageAndMetadata[Array[Byte], Array[Byte]], message: T): Option[T] = Try {
     // Read the encoding and schema id
     val data = kafkaMessage.message()
@@ -81,12 +99,12 @@ abstract class AvroDecoder[T <: SpecificRecord](schema_repo_url: String, topic: 
   }
 
   /**
-    * Method that gets called when an error occurs while decoding a message.
-    */
+   * Method that gets called when an error occurs while decoding a message.
+   */
   protected def onDecodingFailure(e: Exception, message: MessageAndMetadata[Array[Byte], Array[Byte]]): Unit
 
   /**
-    * Method that gets called when an error occurs while retrieving a schema from the repository.
-    */
+   * Method that gets called when an error occurs while retrieving a schema from the repository.
+   */
   protected def onSchemaRepoFailure(e: Exception): Unit
 }
