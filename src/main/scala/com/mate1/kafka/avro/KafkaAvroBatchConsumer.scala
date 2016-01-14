@@ -89,9 +89,10 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
   /**
    * Commits the offset the last message consumed from the the queue.
    */
-  protected final def commitOffsets(): Unit = {
-    if (!stopped.get && active.get())
+  protected final def commitOffsets(): Unit = consumer match {
+    case consumer: ConsumerConnector if !stopped.get =>
       consumer.commitOffsets
+    case _ =>
   }
 
   /**
@@ -141,11 +142,13 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
   @Override
   final def run(): Unit = {
     Try {
+      // Update status
+      active.set(true)
+
       // Initialize consumer
       consumer = Consumer.create(consumerConfig)
 
-      // Update status
-      active.set(true)
+      // Start the consumer
       onStart()
 
       // Initialize message iterator
@@ -199,7 +202,14 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
    * Starts the consumer on a new thread.
    */
   final def start(): Unit = {
-    new Thread(this).start()
+    if (!active.get()) {
+      // Run the consumer
+      new Thread(this).start()
+
+      // Update status
+      active.set(true)
+      stopped.set(false)
+    }
   }
 
   /**
