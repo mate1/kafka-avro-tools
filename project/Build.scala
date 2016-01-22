@@ -38,8 +38,6 @@ object Build extends Build {
     ),
     javacOptions ++= Seq("-g:none"),
     scalacOptions ++= Seq("-feature", "-g:none")
-    ,credentials += Credentials("Sonatype Nexus Repository Manager", "maven.mate1", "admin", "foobar")
-    ,publishTo := Some("Sonatype Nexus Repository Manager" at "http://maven.mate1:8081/nexus/content/repositories/releases/")
   )
 
   // Scalamail project
