@@ -154,7 +154,7 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
       // Initialize message iterator
       val iterator = consumer.createMessageStreams(Map(topic -> 1))(topic).head.iterator()
       batchTimestamp = Platform.currentTime
-      while (true) {
+      while (!stopped.get) {
         // Get the next message and de-serialize it
         Try {
           if (iterator.hasNext())
@@ -193,9 +193,11 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
       case _ =>
     }
 
+    // Terminate the consumer
+    onStopped()
+
     // Update status
     active.set(false)
-    onStopped()
   }
 
   /**
@@ -219,8 +221,11 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
     if (!stopped.getAndSet(true)) {
       onStop()
 
-      if (active.get())
-        consumer.shutdown()
+      consumer match {
+        case consumer: ConsumerConnector =>
+          consumer.shutdown()
+        case _ =>
+      }
     }
   }
 
