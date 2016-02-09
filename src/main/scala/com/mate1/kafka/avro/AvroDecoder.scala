@@ -59,7 +59,7 @@ abstract class AvroDecoder[T <: SpecificRecord](schema_repo_url: String, topic: 
       case repoUrl: String if repoUrl.trim.nonEmpty =>
         Try(AvroSchemaRepository(schema_repo_url).getSchema(topic, schemaId).get) match {
           case Failure(e: Exception) =>
-            onSchemaRepoFailure(e)
+            onSchemaRepoFailure(schemaId, e)
             message.getSchema
           case Failure(e: Throwable) =>
             throw e
@@ -106,5 +106,5 @@ abstract class AvroDecoder[T <: SpecificRecord](schema_repo_url: String, topic: 
   /**
    * Method that gets called when an error occurs while retrieving a schema from the repository.
    */
-  protected def onSchemaRepoFailure(e: Exception): Unit
+  protected def onSchemaRepoFailure(schemaId: Short, e: Exception): Unit
 }
