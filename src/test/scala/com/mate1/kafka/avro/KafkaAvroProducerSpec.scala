@@ -18,9 +18,14 @@
 
 package com.mate1.kafka.avro
 
-import com.mate1.kafka.avro.fixtures._
-import kafka.consumer.Consumer
+import java.util.Map.Entry
+import java.util.Properties
 
+import com.mate1.kafka.avro.fixtures._
+import com.typesafe.config.ConfigValue
+import kafka.consumer.{Consumer, ConsumerConfig}
+
+import scala.collection.JavaConverters._
 import scala.compat.Platform
 import scala.concurrent.duration._
 import scala.language.postfixOps
@@ -35,14 +40,10 @@ class KafkaAvroProducerSpec extends UnitSpec with Zookeeper with Kafka with Conf
   it should "prefix messages with the proper magic bytes" in {
     val topic = "MAIL_LOG"
 
-    val producer = new KafkaAvroProducer[TestRecord](AvroProducerConfig(config.getConfig("producer")), topic) {
+    val producer = new KafkaAvroProducer[TestRecord](config.getConfig("producer"), topic) {
       override protected def onClose(): Unit = {}
 
       override protected def onProducerFailure(e: Exception): Unit = {}
-
-      override protected def onSchemaRepoFailure(e: Exception): Unit = {}
-
-      override protected def onEncodingFailure(e: Exception, message: TestRecord): Unit = {}
     }
     val record = new TestRecord()
     record.setTestId(Random.nextLong())
@@ -51,7 +52,10 @@ class KafkaAvroProducerSpec extends UnitSpec with Zookeeper with Kafka with Conf
 
     wait(1 seconds)
 
-    val conf = AvroConsumerConfig(config.getConfig("consumer")).kafkaConsumerConfig()
+    val props = new Properties()
+    for (entry: Entry[String, ConfigValue] <- config.getConfig("consumer").entrySet.asScala)
+      props.put(entry.getKey, entry.getValue.unwrapped.toString)
+    val conf = new ConsumerConfig(props)
     val iterator = Consumer.create(conf).createMessageStreams(Map(topic -> 1))(topic).head.iterator()
     val data = iterator.next().message()
 

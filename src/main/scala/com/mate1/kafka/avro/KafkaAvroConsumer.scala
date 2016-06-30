@@ -18,6 +18,7 @@
 
 package com.mate1.kafka.avro
 
+import com.typesafe.config.Config
 import org.apache.avro.specific.SpecificRecord
 
 import scala.concurrent.duration._
@@ -32,8 +33,8 @@ import scala.reflect.ClassTag
  * If any exceptions are thrown by the consume function then the offset of the current message
  * may or may not be committed (if auto-commit is not disabled) and the consumer will stop.
  */
-abstract class KafkaAvroConsumer[T <: SpecificRecord](config: AvroConsumerConfig, topic: String, message: T)(implicit tag: ClassTag[T])
-  extends KafkaAvroBatchConsumer[T](config, topic, Seq(message), 0 millisecond) {
+abstract class KafkaAvroConsumer[T <: SpecificRecord](config: Config, topic: String)(implicit tag: ClassTag[T])
+  extends KafkaAvroBatchConsumer[T](config, topic, 1, 0 millisecond) {
 
   /**
    * Method that gets called each time a new message is ready for processing.

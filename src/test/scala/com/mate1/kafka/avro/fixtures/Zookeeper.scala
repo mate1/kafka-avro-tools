@@ -21,12 +21,13 @@ package com.mate1.kafka.avro.fixtures
 import java.io.File
 import java.net.InetSocketAddress
 
-import org.apache.zookeeper.server.{NIOServerCnxn, ZooKeeperServer}
+import org.apache.commons.io.FileUtils
+import org.apache.zookeeper.server.{NIOServerCnxnFactory, ZooKeeperServer}
 import org.scalatest.{BeforeAndAfterAll, Suite}
 
 trait Zookeeper extends BeforeAndAfterAll { this: Suite =>
 
-  private var factory: NIOServerCnxn.Factory = _
+  private var factory: NIOServerCnxnFactory = _
   private var tmpDir: File = _
 
   override protected def beforeAll() {
@@ -38,7 +39,8 @@ trait Zookeeper extends BeforeAndAfterAll { this: Suite =>
     FileUtils.deleteDirectory(tmpDir)
     tmpDir.mkdirs()
 
-    factory = new NIOServerCnxn.Factory(new InetSocketAddress(12181), 5000)
+    factory = new NIOServerCnxnFactory()
+    factory.configure(new InetSocketAddress(12181), 5000)
     factory.startup(new ZooKeeperServer(tmpDir, tmpDir, 2000))
   }
 
@@ -47,7 +49,7 @@ trait Zookeeper extends BeforeAndAfterAll { this: Suite =>
 
     try {
       factory match {
-        case factory: NIOServerCnxn.Factory =>
+        case factory: NIOServerCnxnFactory =>
           factory.shutdown()
         case _ =>
       }

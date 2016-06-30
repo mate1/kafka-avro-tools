@@ -22,6 +22,7 @@ import java.io.File
 import java.util.Properties
 
 import kafka.server.{KafkaConfig, KafkaServer}
+import org.apache.commons.io.FileUtils
 import org.scalatest.{BeforeAndAfterAll, Suite}
 
 trait Kafka extends BeforeAndAfterAll { this: Suite =>

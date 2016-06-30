@@ -18,12 +18,17 @@
 
 package com.mate1.kafka.avro
 
+import java.util.Map.Entry
+import java.util.Properties
 import java.util.concurrent.atomic.AtomicBoolean
 
-import kafka.consumer.{Consumer, ConsumerConfig, ConsumerConnector, ConsumerTimeoutException}
+import com.typesafe.config.{Config, ConfigFactory, ConfigValue}
+import io.confluent.kafka.serializers.KafkaAvroDeserializer
 import org.apache.avro.specific.SpecificRecord
+import org.apache.kafka.clients.consumer.{ConsumerConfig, KafkaConsumer}
 
 import scala.annotation.tailrec
+import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.compat.Platform
 import scala.concurrent.duration.Duration
@@ -41,8 +46,7 @@ import scala.util.{Failure, Try}
  *
  * If any exceptions are thrown by the consume function then the offsets will not be committed and the consumer will stop.
  */
-abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerConfig, topic: String, messages: Seq[T], timeout: Duration)(implicit tag: ClassTag[T])
-  extends AvroDecoder[T](config.schema_repo_url, topic) with Runnable {
+abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: Config, topic: String, batchSize: Int, timeout: Duration)(implicit tag: ClassTag[T]) extends Runnable {
 
   /**
    * Whether this consumer thread is still running.
@@ -62,24 +66,12 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
   /**
    * Kafka consumer connector.
    */
-  private var consumer: ConsumerConnector = _
+  private var consumer: KafkaConsumer[Unit, T] = _
 
   /**
    * Kafka consumer config.
    */
-  private val consumerConfig = config.kafkaConsumerConfig(Seq[(String,String)](
-    // Force disable auto commit if batch size is greater than 1, because we will manually commit after each batch
-    if (messages.size > 1)
-      "auto.commit.enable" -> "false"
-    else
-      null
-    ,
-    // Force consumer timeout if batch size is greater than 1, because we want the stream iterator to timeout periodically to check the time since last consume
-    if (messages.size > 1 && Try(config.conf.getString("consumer.timeout.ms").toLong).filter(_ > 0).isFailure)
-      "consumer.timeout.ms" -> Math.max(timeout.toMillis/10,200).toString
-    else
-      null
-  ).filter(_ != null).toMap)
+  private val consumerConfig = getKafkaConsumerConfig
 
   /**
    * Whether this consumer was stopped.
@@ -90,8 +82,8 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
    * Commits the offset the last message consumed from the the queue.
    */
   protected final def commitOffsets(): Unit = consumer match {
-    case consumer: ConsumerConnector if !stopped.get =>
-      consumer.commitOffsets
+    case consumer: KafkaConsumer[Unit, T] if !stopped.get =>
+      consumer.commitSync()
     case _ =>
   }
 
@@ -104,7 +96,30 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
   /**
    * @return the Kafka config used by this consumer
    */
-  final def getConfig: ConsumerConfig = consumerConfig
+  final def getConfig: Properties = consumerConfig
+
+  /**
+   * @return the Kafka consumer config
+   */
+  private def getKafkaConsumerConfig: Properties = {
+    val overrides = mutable.Map[String, String]()
+
+    // Force disable auto commit if batch size is greater than 1, because we will manually commit after each batch
+    if (batchSize > 1)
+      overrides.put("enable.auto.commit", "false")
+
+    // Generate Kafka consumer config
+    val conf = if (overrides.nonEmpty) ConfigFactory.parseMap(overrides.asJava).withFallback(config) else config
+    val props = new Properties()
+
+    props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, classOf[KafkaAvroDeserializer])
+    props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, classOf[KafkaAvroDeserializer])
+
+    for (entry: Entry[String, ConfigValue] <- conf.entrySet.asScala)
+        props.put(entry.getKey, entry.getValue.unwrapped.toString)
+
+    props
+  }
 
   /**
    * @return the topic targeted by this consumer
@@ -146,35 +161,22 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
       active.set(true)
 
       // Initialize consumer
-      consumer = Consumer.create(consumerConfig)
+      consumer = new KafkaConsumer[Unit, T](consumerConfig)
 
       // Start the consumer
       onStart()
 
       // Initialize message iterator
-      val iterator = consumer.createMessageStreams(Map(topic -> 1))(topic).head.iterator()
       batchTimestamp = Platform.currentTime
       while (!stopped.get) {
-        // Get the next message and de-serialize it
-        Try {
-          if (iterator.hasNext())
-            deserializeMessage(iterator.next(), messages(batch.size)) match {
-              case Some(msg: T) =>
-                batch += msg
-              case _ =>
-            }
-        } match {
-          case Failure(e: ConsumerTimeoutException) if messages.size > 1 =>
-            // Ignore consumer timeouts while batching
-          case Failure(e: Throwable) =>
-            throw e
-          case _ =>
-        }
+        val iterator = consumer.poll(timeout.toMillis).iterator()
+        while (iterator.hasNext)
+          batch += iterator.next().value()
 
-        if (batch.size >= messages.size || Platform.currentTime - batchTimestamp > timeout.toMillis) {
+        if (batch.size >= batchSize || Platform.currentTime - batchTimestamp > timeout.toMillis) {
           if (batch.nonEmpty) {
             consume(batch)
-            if (messages.size > 1)
+            if (batchSize > 1)
               commitOffsets()
             batch.clear()
           }
@@ -183,8 +185,7 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
       }
     } match {
       case Failure(e: Exception) =>
-        if (!e.isInstanceOf[ConsumerTimeoutException])
-          onConsumerFailure(e)
+        onConsumerFailure(e)
         // Stop the consumer
         stop()
       case Failure(e: Throwable) =>
@@ -222,8 +223,8 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
       onStop()
 
       consumer match {
-        case consumer: ConsumerConnector =>
-          consumer.shutdown()
+        case consumer: KafkaConsumer[Unit, T] =>
+          consumer.close()
         case _ =>
       }
     }

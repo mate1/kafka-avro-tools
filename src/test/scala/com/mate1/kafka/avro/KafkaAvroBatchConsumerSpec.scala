@@ -39,33 +39,25 @@ class KafkaAvroBatchConsumerSpec extends UnitSpec with Zookeeper with Kafka with
 
     val topic = "TEST_LOG"
 
-    val consumer = new KafkaAvroBatchConsumer[TestRecord](AvroConsumerConfig(config.getConfig("consumer")), topic, (1 to batchSize).map(x => new TestRecord()), 3.seconds) {
+    val consumer = new KafkaAvroBatchConsumer[TestRecord](config.getConfig("consumer"), topic, batchSize, 3.seconds) {
       override protected def consume(message: Seq[TestRecord]): Unit = {
         arrivedBatch += message.size
       }
 
       final override protected def onConsumerFailure(e: Exception): Unit = {}
 
-      final override protected def onDecodingFailure(e: Exception, message: MessageAndMetadata[Array[Byte], Array[Byte]]): Unit = {}
-
       final override protected def onStart(): Unit = {}
 
       final override protected def onStop(): Unit = {}
 
       final override protected def onStopped(): Unit = {}
-
-      final override protected def onSchemaRepoFailure(e: Exception): Unit = {}
     }
 
-    val producer = new KafkaAvroProducer[TestRecord](AvroProducerConfig(config.getConfig("producer")), topic) {
+    val producer = new KafkaAvroProducer[TestRecord](config.getConfig("producer"), topic) {
 
       override protected def onClose(): Unit = {}
 
       override protected def onProducerFailure(e: Exception): Unit = {}
-
-      override protected def onSchemaRepoFailure(e: Exception): Unit = {}
-
-      override protected def onEncodingFailure(e: Exception, message: TestRecord): Unit = {}
     }
 
     val batch = (1 to 20).map(x => {

@@ -18,11 +18,17 @@
 
 package com.mate1.kafka.avro
 
+import java.util.Map.Entry
+import java.util.Properties
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
 
-import kafka.producer.{KeyedMessage, Producer}
+import com.typesafe.config.{Config, ConfigValue}
+import io.confluent.kafka.serializers.KafkaAvroSerializer
 import org.apache.avro.specific.SpecificRecord
+import org.apache.kafka.clients.producer.{KafkaProducer, ProducerConfig, ProducerRecord}
 
+import scala.collection.JavaConverters._
 import scala.reflect._
 import scala.util.{Failure, Success, Try}
 
@@ -31,8 +37,7 @@ import scala.util.{Failure, Success, Try}
  *
  * Some magic bytes that specify the encoding format and the version of the schema used will be written before each message's data.
  */
-abstract class KafkaAvroProducer[T <: SpecificRecord](config: AvroProducerConfig, topic: String)(implicit tag: ClassTag[T])
-  extends AvroEncoder[T](config.default_schema_id, config.encoding, config.schema_repo_url, topic) {
+abstract class KafkaAvroProducer[T <: SpecificRecord](config: Config, topic: String)(implicit tag: ClassTag[T]) {
 
   /**
    * Whether the producer was closed.
@@ -42,12 +47,12 @@ abstract class KafkaAvroProducer[T <: SpecificRecord](config: AvroProducerConfig
   /**
    * Kafka producer.
    */
-  private var producer: Option[Producer[String, Array[Byte]]] = None
+  private var producer: Option[KafkaProducer[Unit, T]] = None
 
   /**
    * Kafka producer config.
    */
-  private val producerConfig = config.kafkaProducerConfig()
+  private val producerConfig = getKafkaProducerConfig
 
   /**
    * Close this producer, preventing further messages from being published.
@@ -60,6 +65,21 @@ abstract class KafkaAvroProducer[T <: SpecificRecord](config: AvroProducerConfig
         producer.get.close()
       producer = None
     }
+  }
+
+  /**
+   * @return the Kafka producer config
+   */
+  private def getKafkaProducerConfig: Properties = {
+    val props = new Properties()
+
+    props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, classOf[KafkaAvroSerializer])
+    props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, classOf[KafkaAvroSerializer])
+
+    for (entry: Entry[String, ConfigValue] <- config.entrySet.asScala)
+      props.put(entry.getKey, entry.getValue.unwrapped.toString)
+
+    props
   }
 
   /**
@@ -84,16 +104,19 @@ abstract class KafkaAvroProducer[T <: SpecificRecord](config: AvroProducerConfig
    */
   final def publish(message: T): Boolean = Try {
     if (!closed.get()) {
-      // Serialize and queue the message on the broker
-      val data = serializeMessage(message)
-      if (data.isDefined) {
-        if (producer.isEmpty)
-          producer = Some(new Producer[String, Array[Byte]](producerConfig))
-        producer.get.send(new KeyedMessage(topic, data.get))
-        true
+      // Initialize the producer on first message or if an error occurred
+      if (producer.isEmpty)
+        producer = Some(new KafkaProducer[Unit, T](producerConfig))
+
+      // Send the message to the brokers
+      Try(producer.get.send(new ProducerRecord[Unit, T](topic, message)).get) match {
+        case Failure(e: ExecutionException) =>
+          throw e.getCause
+        case Failure(_) =>
+          false
+        case Success(_) =>
+          true
       }
-      else
-        false
     }
     else
       false
