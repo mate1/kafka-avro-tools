@@ -18,8 +18,6 @@
 
 package com.mate1.kafka.avro.fixtures
 
-import java.io.File
-
 import com.typesafe.config.ConfigFactory
 import org.scalatest.{Suite, SuiteMixin}
 
@@ -27,11 +25,18 @@ import scala.collection.JavaConverters._
 
 trait Config extends SuiteMixin { this: Suite =>
 
-  final def loadConfig(): com.typesafe.config.Config = {
-    ConfigFactory.parseFile(new File("src/test/resources/test.conf")).resolve()
-  }
+  val consumerConfig = ConfigFactory.parseMap(Map(
+    "auto.offset.reset" -> "earliest",
+    "bootstrap.servers" -> "localhost:19092",
+    "group.id" -> "test",
+    "schema.registry.url" -> "http://0.0.0.0:8081"
+  ).asJava)
 
-  final def loadConfig(overrides: Map[String, String]): com.typesafe.config.Config = {
-    ConfigFactory.parseMap(overrides.asJava).withFallback(loadConfig()).resolve()
-  }
+  val producerConfig = ConfigFactory.parseMap(Map(
+    "bootstrap.servers" -> "localhost:19092",
+    "producer.type" -> "sync",
+    "request.required.acks" -> "1",
+    "schema.registry.url" -> "http://0.0.0.0:8081"
+  ).asJava)
+
 }

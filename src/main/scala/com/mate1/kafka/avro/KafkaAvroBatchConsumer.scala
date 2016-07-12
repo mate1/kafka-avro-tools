@@ -108,6 +108,9 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: Config, topic
     if (batchSize > 1)
       overrides.put("enable.auto.commit", "false")
 
+    // Set the max polled records to the batch size
+    overrides.put("max.poll.records", batchSize.toString)
+
     // Generate Kafka consumer config
     val conf = if (overrides.nonEmpty) ConfigFactory.parseMap(overrides.asJava).withFallback(config) else config
     val props = new Properties()
@@ -162,6 +165,7 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: Config, topic
 
       // Initialize consumer
       consumer = new KafkaConsumer[Unit, T](consumerConfig)
+      consumer.subscribe(Seq(topic).asJava)
 
       // Start the consumer
       onStart()

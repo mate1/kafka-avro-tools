@@ -54,7 +54,8 @@ object Build extends Build {
 
         // Test dependencies
         "commons-io" % "commons-io" % "2.4" % Test,
-        "org.scalatest" %% "scalatest" % "2.2.1" % Test
+        "org.scalatest" %% "scalatest" % "2.2.1" % Test,
+        "io.confluent" % "kafka-schema-registry" % "3.0.0" % Test exclude("org.apache.kafka", "kafka_2.11")
       )
     )
 

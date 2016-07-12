@@ -18,33 +18,26 @@
 
 package com.mate1.kafka.avro
 
+import com.mate1.kafka.avro.fixtures.{Config, Kafka, SchemaRegistry, UnitSpec, Zookeeper}
 
-import com.mate1.kafka.avro.fixtures.{Config, Kafka, UnitSpec, Zookeeper}
-import kafka.message.MessageAndMetadata
-
-import scala.collection.mutable.MutableList
+import scala.collection.mutable
 import scala.compat.Platform
 import scala.concurrent.duration._
 
-class KafkaAvroBatchConsumerSpec extends UnitSpec with Zookeeper with Kafka with Config {
+class KafkaAvroToolsSpec extends UnitSpec with Zookeeper with Kafka with SchemaRegistry with Config {
 
   behavior of "The Kafka Avro batch consumer"
 
-  val config = loadConfig()
-
-  val batchSize = 10
-
-  it should "consume a batch smaller than batchSize" in {
-    val arrivedBatch = MutableList(1)
-
+  it should "consume 20 messages in 3 batches" in {
+    val batchSizes = mutable.Buffer[Int]()
     val topic = "TEST_LOG"
 
-    val consumer = new KafkaAvroBatchConsumer[TestRecord](config.getConfig("consumer"), topic, batchSize, 3.seconds) {
+    val consumer = new KafkaAvroBatchConsumer[TestRecord](consumerConfig, topic, 10, 3.seconds) {
       override protected def consume(message: Seq[TestRecord]): Unit = {
-        arrivedBatch += message.size
+        batchSizes += message.size
       }
 
-      final override protected def onConsumerFailure(e: Exception): Unit = {}
+      final override protected def onConsumerFailure(e: Exception): Unit = { e.printStackTrace() }
 
       final override protected def onStart(): Unit = {}
 
@@ -53,11 +46,10 @@ class KafkaAvroBatchConsumerSpec extends UnitSpec with Zookeeper with Kafka with
       final override protected def onStopped(): Unit = {}
     }
 
-    val producer = new KafkaAvroProducer[TestRecord](config.getConfig("producer"), topic) {
-
+    val producer = new KafkaAvroProducer[TestRecord](producerConfig, topic) {
       override protected def onClose(): Unit = {}
 
-      override protected def onProducerFailure(e: Exception): Unit = {}
+      override protected def onProducerFailure(e: Exception): Unit = { e.printStackTrace() }
     }
 
     val batch = (1 to 20).map(x => {
@@ -79,10 +71,11 @@ class KafkaAvroBatchConsumerSpec extends UnitSpec with Zookeeper with Kafka with
 
     wait(4.seconds)
 
-    assert(arrivedBatch.size == 4)
-    assert(arrivedBatch(1) == 6)
-    assert(arrivedBatch(2) == 10)
-    assert(arrivedBatch(3) == 4)
+    assert(batchSizes.size == 3)
+    assert(batchSizes.sum == 20)
+    assert(batchSizes.head == 6)
+    assert(batchSizes(1) == 10)
+    assert(batchSizes(2) == 4)
 
     thread.stop()
   }
