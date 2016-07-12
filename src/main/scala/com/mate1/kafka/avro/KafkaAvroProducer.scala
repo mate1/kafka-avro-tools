@@ -33,11 +33,11 @@ import scala.reflect._
 import scala.util.{Failure, Success, Try}
 
 /**
- * A Kafka producer implementation that publishes Avro messages unto a topic.
+ * A Kafka producer implementation that publishes Avro messages onto one or several topics.
  *
  * Some magic bytes that specify the encoding format and the version of the schema used will be written before each message's data.
  */
-abstract class KafkaAvroProducer[T <: SpecificRecord](config: Config, topic: String)(implicit tag: ClassTag[T]) {
+abstract class KafkaAvroProducer[T <: SpecificRecord](config: Config)(implicit tag: ClassTag[T]) {
 
   /**
    * Whether the producer was closed.
@@ -100,9 +100,10 @@ abstract class KafkaAvroProducer[T <: SpecificRecord](config: Config, topic: Str
   /**
    * Adds the specified message to the specified topic.
    * @param message the message to be published
+   * @param topic the topic onto which to publish the message
    * @return true if the message was published successfully, false otherwise
    */
-  final def publish(message: T): Boolean = Try {
+  final def publish(message: T, topic: String): Boolean = Try {
     if (!closed.get()) {
       // Initialize the producer on first message or if an error occurred
       if (producer.isEmpty)

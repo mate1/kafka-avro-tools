@@ -46,7 +46,7 @@ class KafkaAvroToolsSpec extends UnitSpec with Zookeeper with Kafka with SchemaR
       final override protected def onStopped(): Unit = {}
     }
 
-    val producer = new KafkaAvroProducer[TestRecord](producerConfig, topic) {
+    val producer = new KafkaAvroProducer[TestRecord](producerConfig) {
       override protected def onClose(): Unit = {}
 
       override protected def onProducerFailure(e: Exception): Unit = { e.printStackTrace() }
@@ -60,16 +60,16 @@ class KafkaAvroToolsSpec extends UnitSpec with Zookeeper with Kafka with SchemaR
     })
 
     val (batchPart1, batchPart2) = batch.splitAt(6)
-    batchPart1.foreach(record => producer.publish(record))
+    batchPart1.foreach(record => producer.publish(record, topic))
 
     val thread = new Thread(consumer)
     thread.start()
 
-    wait(5.seconds)
+    wait(6.seconds)
 
-    batchPart2.foreach(record => producer.publish(record))
+    batchPart2.foreach(record => producer.publish(record, topic))
 
-    wait(4.seconds)
+    wait(6.seconds)
 
     assert(batchSizes.size == 3)
     assert(batchSizes.sum == 20)
