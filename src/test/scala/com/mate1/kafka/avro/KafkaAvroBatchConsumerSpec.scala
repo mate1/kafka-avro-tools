@@ -28,13 +28,13 @@ class KafkaAvroBatchConsumerSpec extends UnitSpec with Zookeeper with Kafka with
 
   behavior of "The Kafka Avro batch consumer"
 
-  it should "consume 20 messages in several batches" in {
+  it should "consume 20 records in several batches" in {
     val batches = mutable.Buffer[Seq[TestRecord]]()
     val topic = "TEST_LOG"
 
     val consumer = new KafkaAvroBatchConsumer[TestRecord](consumerConfig, topic, 10, 3.seconds) {
-      override protected def consume(messages: Seq[TestRecord]): Unit = {
-        batches += messages
+      override protected def consume(records: Seq[TestRecord]): Unit = {
+        batches += records
       }
 
       final override protected def onConsumerFailure(e: Exception): Unit = { e.printStackTrace() }
@@ -62,8 +62,7 @@ class KafkaAvroBatchConsumerSpec extends UnitSpec with Zookeeper with Kafka with
     val (batch1, batch2) = batch.splitAt(6)
     batch1.foreach(record => producer.publish(record, topic))
 
-    val thread = new Thread(consumer)
-    thread.start()
+    consumer.start()
 
     wait(6.seconds)
 
@@ -71,19 +70,20 @@ class KafkaAvroBatchConsumerSpec extends UnitSpec with Zookeeper with Kafka with
 
     wait(6.seconds)
 
+    consumer.stop()
+    consumer.waitUntilStopped()
+
     assert(batches.size >= 2)
-    assert(batches.foldLeft(0)((result, messages) => { result + messages.size }) == 20)
+    assert(batches.foldLeft(0)((result, records) => { result + records.size }) == 20)
     assert(batches(0).size == 6)
     assert(batches(1).size >= 10)
 
     var matches = true
-    val messages = batches.flatten
-    for (i <- messages.indices) {
-      matches = matches && messages(i).getTestId == i
+    val records = batches.flatten
+    for (i <- records.indices) {
+      matches = matches && records(i).getTestId == i
     }
     assert(matches)
-
-    thread.stop()
   }
 
 }

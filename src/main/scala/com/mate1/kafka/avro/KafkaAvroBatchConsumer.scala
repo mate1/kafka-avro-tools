@@ -22,7 +22,7 @@ import java.util.Map.Entry
 import java.util.Properties
 import java.util.concurrent.atomic.AtomicBoolean
 
-import com.typesafe.config.{Config, ConfigFactory, ConfigValue}
+import com.typesafe.config.{Config, ConfigValue}
 import io.confluent.kafka.serializers.KafkaAvroDeserializer
 import org.apache.avro.specific.SpecificRecord
 import org.apache.kafka.clients.consumer.{ConsumerConfig, KafkaConsumer}
@@ -35,12 +35,12 @@ import scala.concurrent.duration.Duration
 import scala.util.{Failure, Try}
 
 /**
- * A Kafka consumer implementation that reads several Avro messages from the topic into a batch before processing them.
+ * A Kafka consumer implementation that reads several Avro records from the topic into a batch before processing them.
  *
  * The batch will be passed to the consume function once it is full or its age exceeds the specified timeout.
  *
  * This consumer will disable the auto-commit feature and enable read timeout on the underlying Kafka consumer
- * if the size of the batch of messages used is greater than 1. Offsets will instead be committed manually after
+ * if the size of the batch of records used is greater than 1. Offsets will instead be committed manually after
  * each batch has been processed successfully.
  *
  * If any exceptions are thrown by the consume function then the offsets will not be committed and the consumer will stop.
@@ -53,24 +53,14 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: Config, topic
   private val active = new AtomicBoolean(false)
 
   /**
-   * List of messages in the current batch.
-   */
-  private var batch = mutable.ListBuffer[T]()
-
-  /**
-   * Timestamp of when the current batch was started.
-   */
-  private var batchTimestamp = 0L
-
-  /**
-   * Kafka consumer connector.
-   */
-  private var consumer: KafkaConsumer[Unit, T] = _
-
-  /**
    * Kafka consumer config.
    */
   private val consumerConfig = getKafkaConsumerConfig
+
+  /**
+   * Flag that indicates whether offset should be committed before next poll.
+   */
+  private var flushOffsets = false
 
   /**
    * Whether this consumer was stopped.
@@ -78,19 +68,18 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: Config, topic
   private val stopped = new AtomicBoolean(false)
 
   /**
-   * Commits the offset the last message consumed from the the queue.
+   * Commits the offset the last record consumed from the the queue before the next cycle.
    */
-  protected final def commitOffsets(): Unit = consumer match {
-    case consumer: KafkaConsumer[Unit, T] if !stopped.get =>
-      consumer.commitSync()
-    case _ =>
+  protected final def commitOffsets(): Unit = {
+    if (!stopped.get)
+      flushOffsets = true
   }
 
   /**
-   * Method that gets called each time a new batch of messages is ready for processing.
-   * @param messages the message to process
+   * Method that gets called each time a new batch of records is ready for processing.
+   * @param records the record to process
    */
-  protected def consume(messages: Seq[T]): Unit
+  protected def consume(records: Seq[T]): Unit
 
   /**
    * @return the Kafka config used by this consumer
@@ -101,27 +90,24 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: Config, topic
    * @return the Kafka consumer config
    */
   private def getKafkaConsumerConfig: Properties = {
-    val overrides = mutable.Map[String, String]()
-
-    // Force disable auto commit if batch size is greater than 1, because we will manually commit after each batch
-    if (batchSize > 1)
-      overrides.put("enable.auto.commit", "false")
-
-    // Set the max polled records to the batch size
-    overrides.put("max.poll.records", batchSize.toString)
-
-    // Enable specific Avro reader
-    overrides.put("specific.avro.reader", "true")
-
-    // Generate Kafka consumer config
-    val conf = if (overrides.nonEmpty) ConfigFactory.parseMap(overrides.asJava).withFallback(config) else config
     val props = new Properties()
 
+    for (entry: Entry[String, ConfigValue] <- config.entrySet.asScala)
+        props.put(entry.getKey, entry.getValue.unwrapped.toString)
+
+    // Set the key & value deserializers
     props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, classOf[KafkaAvroDeserializer])
     props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, classOf[KafkaAvroDeserializer])
 
-    for (entry: Entry[String, ConfigValue] <- conf.entrySet.asScala)
-        props.put(entry.getKey, entry.getValue.unwrapped.toString)
+    // Disable auto commit if batch size is greater than 1, because we will manually commit after each batch
+    if (batchSize > 1)
+      props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false")
+
+    // Set the max polled records to the batch size
+    props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, batchSize.toString)
+
+    // Enable the creation of specific Avro records
+    props.put("specific.avro.reader", "true")
 
     props
   }
@@ -164,44 +150,60 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: Config, topic
     Try {
       // Update status
       active.set(true)
+      stopped.set(false)
 
       // Initialize consumer
-      consumer = new KafkaConsumer[Unit, T](consumerConfig)
+      val consumer = new KafkaConsumer[Unit, T](consumerConfig)
       consumer.subscribe(Seq(topic).asJava)
 
       // Start the consumer
-      onStart()
+      Try(onStart())
 
-      // Initialize message iterator
-      batchTimestamp = Platform.currentTime
-      while (!stopped.get) {
-        val iterator = consumer.poll(timeout.toMillis).iterator()
-        while (iterator.hasNext)
-          batch += iterator.next().value()
-
-        if (batch.size >= batchSize || Platform.currentTime - batchTimestamp >= timeout.toMillis) {
-          if (batch.nonEmpty) {
-            consume(batch)
-            if (batchSize > 1)
-              commitOffsets()
-            batch = mutable.ListBuffer[T]()
+      // Polling loop
+      Try {
+        var batch = mutable.ListBuffer[T]()
+        var batchTimestamp = Platform.currentTime
+        while (!stopped.get) {
+          // Commit offsets
+          if (flushOffsets) {
+            flushOffsets = false
+            consumer.commitSync()
           }
-          batchTimestamp = Platform.currentTime
+
+          // Pool records from the topic into the current batch
+          val iterator = consumer.poll(timeout.toMillis).iterator()
+          while (iterator.hasNext)
+            batch += iterator.next().value()
+
+          // Process records if batch is full or timeout is reached
+          if (batch.size >= batchSize || Platform.currentTime - batchTimestamp >= timeout.toMillis) {
+            if (batch.nonEmpty) {
+              consume(batch)
+              if (batchSize > 1) {
+                consumer.commitSync()
+                flushOffsets = false
+              }
+              batch = mutable.ListBuffer[T]()
+            }
+            batchTimestamp = Platform.currentTime
+          }
         }
+      } match {
+        case Failure(e: Exception) =>
+          Try(onConsumerFailure(e))
+        case _ =>
       }
+
+      // Close the consumer
+      consumer.close()
     } match {
       case Failure(e: Exception) =>
-        onConsumerFailure(e)
-        // Stop the consumer
-        stop()
-      case Failure(e: Throwable) =>
-        // Stop the consumer
-        stop()
+        Try(onConsumerFailure(e))
       case _ =>
     }
 
     // Terminate the consumer
-    onStopped()
+    Try(onStopped())
 
     // Update status
     active.set(false)
@@ -212,12 +214,8 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: Config, topic
    */
   final def start(): Unit = {
     if (!active.get()) {
-      // Run the consumer
+      // Run the consumer in a new thread
       new Thread(this).start()
-
-      // Update status
-      active.set(true)
-      stopped.set(false)
     }
   }
 
@@ -225,15 +223,8 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: Config, topic
    * Stops the consumer.
    */
   final def stop(): Unit = {
-    if (!stopped.getAndSet(true)) {
-      onStop()
-
-      consumer match {
-        case consumer: KafkaConsumer[Unit, T] =>
-          consumer.close()
-        case _ =>
-      }
-    }
+    if (!stopped.getAndSet(true))
+      Try(onStop())
   }
 
   /**

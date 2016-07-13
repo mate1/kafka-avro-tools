@@ -33,9 +33,9 @@ import scala.reflect._
 import scala.util.{Failure, Success, Try}
 
 /**
- * A Kafka producer implementation that publishes Avro messages onto one or several topics.
+ * A Kafka producer implementation that publishes Avro records onto one or several topics.
  *
- * Some magic bytes that specify the encoding format and the version of the schema used will be written before each message's data.
+ * Some magic bytes that specify the encoding format and the version of the schema used will be written before each record's data.
  */
 abstract class KafkaAvroProducer[T <: SpecificRecord](config: Config)(implicit tag: ClassTag[T]) {
 
@@ -55,7 +55,7 @@ abstract class KafkaAvroProducer[T <: SpecificRecord](config: Config)(implicit t
   private val producerConfig = getKafkaProducerConfig
 
   /**
-   * Close this producer, preventing further messages from being published.
+   * Close this producer, preventing further records from being published.
    */
   final def close(): Unit = {
     if (!closed.getAndSet(true)) {
@@ -73,11 +73,12 @@ abstract class KafkaAvroProducer[T <: SpecificRecord](config: Config)(implicit t
   private def getKafkaProducerConfig: Properties = {
     val props = new Properties()
 
-    props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, classOf[KafkaAvroSerializer])
-    props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, classOf[KafkaAvroSerializer])
-
     for (entry: Entry[String, ConfigValue] <- config.entrySet.asScala)
       props.put(entry.getKey, entry.getValue.unwrapped.toString)
+
+    // Set the key & value serializers
+    props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, classOf[KafkaAvroSerializer])
+    props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, classOf[KafkaAvroSerializer])
 
     props
   }
@@ -98,19 +99,19 @@ abstract class KafkaAvroProducer[T <: SpecificRecord](config: Config)(implicit t
   protected def onProducerFailure(e: Exception): Unit
 
   /**
-   * Adds the specified message to the specified topic.
-   * @param message the message to be published
-   * @param topic the topic onto which to publish the message
-   * @return true if the message was published successfully, false otherwise
+   * Adds the specified record to the specified topic.
+   * @param record the record to be published
+   * @param topic the topic onto which to publish the record
+   * @return true if the record was published successfully, false otherwise
    */
-  final def publish(message: T, topic: String): Boolean = Try {
+  final def publish(record: T, topic: String): Boolean = Try {
     if (!closed.get()) {
-      // Initialize the producer on first message or if an error occurred
+      // Initialize the producer on first record or if an error occurred
       if (producer.isEmpty)
         producer = Some(new KafkaProducer[Unit, T](producerConfig))
 
-      // Send the message to the brokers
-      Try(producer.get.send(new ProducerRecord[Unit, T](topic, message)).get) match {
+      // Send the record to the brokers
+      Try(producer.get.send(new ProducerRecord[Unit, T](topic, record)).get) match {
         case Failure(e: ExecutionException) =>
           throw e.getCause
         case Failure(_) =>

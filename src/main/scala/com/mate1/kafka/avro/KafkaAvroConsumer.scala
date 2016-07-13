@@ -25,25 +25,25 @@ import scala.concurrent.duration._
 import scala.language.postfixOps
 
 /**
- * A Kafka consumer implementation that processes Avro messages from the topic one at a time.
+ * A Kafka consumer implementation that processes Avro records from the topic one at a time.
  *
- * Every message will be passed to the consume function as they are read.
+ * Every record will be passed to the consume function as they are read.
  *
- * If any exceptions are thrown by the consume function then the offset of the current message
+ * If any exceptions are thrown by the consume function then the offset of the current record
  * may or may not be committed (if auto-commit is not disabled) and the consumer will stop.
  */
 abstract class KafkaAvroConsumer[T <: SpecificRecord](config: Config, topic: String) extends KafkaAvroBatchConsumer[T](config, topic, 1, 0 millisecond) {
 
   /**
-   * Method that gets called each time a new message is ready for processing.
-   * @param message the message to process
+   * Method that gets called each time a new record is ready for processing.
+   * @param record the record to process
    */
-  protected def consume(message: T): Unit
+  protected def consume(record: T): Unit
 
   /**
-   * Method that gets called each time a new batch of messages is ready for processing.
-   * @param messages the message to process
+   * Method that gets called each time a new batch of records is ready for processing.
+   * @param records the record to process
    */
-  final override protected def consume(messages: Seq[T]): Unit = consume(messages.head)
+  final override protected def consume(records: Seq[T]): Unit = records.foreach(consume)
 
 }

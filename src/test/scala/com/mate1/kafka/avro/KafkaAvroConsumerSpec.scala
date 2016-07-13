@@ -28,13 +28,13 @@ class KafkaAvroConsumerSpec extends UnitSpec with Zookeeper with Kafka with Sche
 
   behavior of "The Kafka Avro consumer"
 
-  it should "consume 20 messages one at a time" in {
-    val messages = mutable.Buffer[TestRecord]()
+  it should "consume 20 records one at a time" in {
+    val records = mutable.Buffer[TestRecord]()
     val topic = "TEST_LOG"
 
     val consumer = new KafkaAvroConsumer[TestRecord](consumerConfig, topic) {
-      override protected def consume(message: TestRecord): Unit = {
-        messages += message
+      override protected def consume(record: TestRecord): Unit = {
+        records += record
       }
 
       final override protected def onConsumerFailure(e: Exception): Unit = { e.printStackTrace() }
@@ -59,20 +59,20 @@ class KafkaAvroConsumerSpec extends UnitSpec with Zookeeper with Kafka with Sche
       producer.publish(record, topic)
     }
 
-    val thread = new Thread(consumer)
-    thread.start()
+    consumer.start()
 
     wait(2.seconds)
 
-    assert(messages.size == 20)
+    consumer.stop()
+    consumer.waitUntilStopped()
+
+    assert(records.size == 20)
 
     var matches = true
-    for (i <- messages.indices) {
-      matches = matches && messages(i).getTestId == i
+    for (i <- records.indices) {
+      matches = matches && records(i).getTestId == i
     }
     assert(matches)
-
-    thread.stop()
   }
 
 }
