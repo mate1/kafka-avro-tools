@@ -32,7 +32,6 @@ import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.compat.Platform
 import scala.concurrent.duration.Duration
-import scala.reflect.ClassTag
 import scala.util.{Failure, Try}
 
 /**
@@ -46,7 +45,7 @@ import scala.util.{Failure, Try}
  *
  * If any exceptions are thrown by the consume function then the offsets will not be committed and the consumer will stop.
  */
-abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: Config, topic: String, batchSize: Int, timeout: Duration)(implicit tag: ClassTag[T]) extends Runnable {
+abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: Config, topic: String, batchSize: Int, timeout: Duration) extends Runnable {
 
   /**
    * Whether this consumer thread is still running.
@@ -56,7 +55,7 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: Config, topic
   /**
    * List of messages in the current batch.
    */
-  private val batch = mutable.ListBuffer[T]()
+  private var batch = mutable.ListBuffer[T]()
 
   /**
    * Timestamp of when the current batch was started.
@@ -110,6 +109,9 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: Config, topic
 
     // Set the max polled records to the batch size
     overrides.put("max.poll.records", batchSize.toString)
+
+    // Enable specific Avro reader
+    overrides.put("specific.avro.reader", "true")
 
     // Generate Kafka consumer config
     val conf = if (overrides.nonEmpty) ConfigFactory.parseMap(overrides.asJava).withFallback(config) else config
@@ -177,12 +179,12 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: Config, topic
         while (iterator.hasNext)
           batch += iterator.next().value()
 
-        if (batch.size >= batchSize || Platform.currentTime - batchTimestamp > timeout.toMillis) {
+        if (batch.size >= batchSize || Platform.currentTime - batchTimestamp >= timeout.toMillis) {
           if (batch.nonEmpty) {
             consume(batch)
             if (batchSize > 1)
               commitOffsets()
-            batch.clear()
+            batch = mutable.ListBuffer[T]()
           }
           batchTimestamp = Platform.currentTime
         }

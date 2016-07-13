@@ -17,6 +17,7 @@
 import sbt.Keys._
 import sbt._
 import sbtavro.SbtAvro._
+import sbtavro.SbtAvro.avroSettings._
 
 object Build extends Build {
 
@@ -29,6 +30,7 @@ object Build extends Build {
     parallelExecution in ThisBuild := false,
     publishArtifact in packageDoc := false,
     publishArtifact in packageSrc := false,
+    publishArtifact in GlobalScope in Test := true,
     sources in doc := Seq.empty,
     sourcesInBase := false,
     resolvers ++= Seq(Resolver.mavenLocal,
@@ -48,7 +50,7 @@ object Build extends Build {
         // General dependencies
         "com.typesafe" % "config" % "1.2.1",
         "io.confluent" % "kafka-avro-serializer" % "3.0.0",
-        "org.apache.avro" % "avro" % "1.7.5",
+        "org.apache.avro" % "avro" % "1.7.7",
         "org.apache.kafka" %% "kafka" % "0.10.0.0-cp1" % Provided,
         "org.apache.kafka" % "kafka-clients" % "0.10.0.0-cp1",
 
@@ -56,7 +58,9 @@ object Build extends Build {
         "commons-io" % "commons-io" % "2.4" % Test,
         "org.scalatest" %% "scalatest" % "2.2.1" % Test,
         "io.confluent" % "kafka-schema-registry" % "3.0.0" % Test exclude("org.apache.kafka", "kafka_2.11")
-      )
+      ),
+
+      (version in avroConfig) := "1.7.7"
     )
 
     // Avro compiler settings

@@ -24,17 +24,17 @@ import scala.collection.mutable
 import scala.compat.Platform
 import scala.concurrent.duration._
 
-class KafkaAvroToolsSpec extends UnitSpec with Zookeeper with Kafka with SchemaRegistry with Config {
+class KafkaAvroBatchConsumerSpec extends UnitSpec with Zookeeper with Kafka with SchemaRegistry with Config {
 
   behavior of "The Kafka Avro batch consumer"
 
-  it should "consume 20 messages in 3 batches" in {
-    val batchSizes = mutable.Buffer[Int]()
+  it should "consume 20 messages in several batches" in {
+    val batches = mutable.Buffer[Seq[TestRecord]]()
     val topic = "TEST_LOG"
 
     val consumer = new KafkaAvroBatchConsumer[TestRecord](consumerConfig, topic, 10, 3.seconds) {
-      override protected def consume(message: Seq[TestRecord]): Unit = {
-        batchSizes += message.size
+      override protected def consume(messages: Seq[TestRecord]): Unit = {
+        batches += messages
       }
 
       final override protected def onConsumerFailure(e: Exception): Unit = { e.printStackTrace() }
@@ -52,30 +52,36 @@ class KafkaAvroToolsSpec extends UnitSpec with Zookeeper with Kafka with SchemaR
       override protected def onProducerFailure(e: Exception): Unit = { e.printStackTrace() }
     }
 
-    val batch = (1 to 20).map(x => {
+    val batch = (0 until 20).map(x => {
       val record = new TestRecord()
       record.setTestId(x.toLong)
       record.setTimestamp(Platform.currentTime)
       record
     })
 
-    val (batchPart1, batchPart2) = batch.splitAt(6)
-    batchPart1.foreach(record => producer.publish(record, topic))
+    val (batch1, batch2) = batch.splitAt(6)
+    batch1.foreach(record => producer.publish(record, topic))
 
     val thread = new Thread(consumer)
     thread.start()
 
     wait(6.seconds)
 
-    batchPart2.foreach(record => producer.publish(record, topic))
+    batch2.foreach(record => producer.publish(record, topic))
 
     wait(6.seconds)
 
-    assert(batchSizes.size == 3)
-    assert(batchSizes.sum == 20)
-    assert(batchSizes.head == 6)
-    assert(batchSizes(1) == 10)
-    assert(batchSizes(2) == 4)
+    assert(batches.size >= 2)
+    assert(batches.foldLeft(0)((result, messages) => { result + messages.size }) == 20)
+    assert(batches(0).size == 6)
+    assert(batches(1).size >= 10)
+
+    var matches = true
+    val messages = batches.flatten
+    for (i <- messages.indices) {
+      matches = matches && messages(i).getTestId == i
+    }
+    assert(matches)
 
     thread.stop()
   }
