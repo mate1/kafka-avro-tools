@@ -39,6 +39,8 @@ class KafkaAvroConsumerSpec extends UnitSpec with Zookeeper with Kafka with Sche
 
       final override protected def onConsumerFailure(e: Exception): Unit = { e.printStackTrace() }
 
+      final override protected def onConsumerTimeout(): Unit = {}
+
       final override protected def onStart(): Unit = {}
 
       final override protected def onStop(): Unit = {}

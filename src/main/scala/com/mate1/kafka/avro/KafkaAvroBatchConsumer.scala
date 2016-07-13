@@ -128,6 +128,11 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: Config, topic
   protected def onConsumerFailure(e: Exception): Unit
 
   /**
+   * Method that gets called when a timeout occurs while consuming from Kafka.
+   */
+  protected def onConsumerTimeout(): Unit
+
+  /**
    * Method that gets called when the consumer is starting.
    */
   protected def onStart(): Unit
@@ -171,9 +176,14 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: Config, topic
           }
 
           // Pool records from the topic into the current batch
-          val iterator = consumer.poll(timeout.toMillis).iterator()
-          while (iterator.hasNext)
-            batch += iterator.next().value()
+          val records = consumer.poll(timeout.toMillis)
+          if (!records.isEmpty) {
+            val iterator = records.iterator()
+            while (iterator.hasNext)
+              batch += iterator.next().value()
+          }
+          else if (timeout.toMillis > 0)
+            Try(onConsumerTimeout())
 
           // Process records if batch is full or timeout is reached
           if (batch.size >= batchSize || Platform.currentTime - batchTimestamp >= timeout.toMillis) {
