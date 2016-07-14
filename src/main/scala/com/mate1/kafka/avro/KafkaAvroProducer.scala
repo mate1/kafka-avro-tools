@@ -59,7 +59,7 @@ abstract class KafkaAvroProducer[T <: SpecificRecord](config: Config)(implicit t
    */
   final def close(): Unit = {
     if (!closed.getAndSet(true)) {
-      onClose()
+      Try(onClose())
 
       if (producer.isDefined)
         producer.get.close()
@@ -111,20 +111,21 @@ abstract class KafkaAvroProducer[T <: SpecificRecord](config: Config)(implicit t
         producer = Some(new KafkaProducer[Unit, T](producerConfig))
 
       // Send the record to the brokers
-      Try(producer.get.send(new ProducerRecord[Unit, T](topic, record)).get) match {
-        case Failure(e: ExecutionException) =>
+      try {
+        producer.get.send(new ProducerRecord[Unit, T](topic, record)).get
+      } catch {
+        case e: ExecutionException =>
+          // The future has caught an exception, unbox it
           throw e.getCause
-        case Failure(_) =>
-          false
-        case Success(_) =>
-          true
       }
+
+      true
     }
     else
       false
   } match {
     case Failure(e: Exception) =>
-      onProducerFailure(e)
+      Try(onProducerFailure(e))
       if (producer.isDefined)
         producer.get.close()
       producer = None
