@@ -63,6 +63,11 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: Config, topic
   private var flushOffsets = false
 
   /**
+   * The number of milliseconds to wait between consecutive poll requests when timeout is 0.
+   */
+  protected val pollInterval = 100
+
+  /**
    * Whether this consumer was stopped.
    */
   private val stopped = new AtomicBoolean(false)
@@ -176,7 +181,7 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: Config, topic
           }
 
           // Pool records from the topic into the current batch
-          val records = consumer.poll(timeout.toMillis)
+          val records = consumer.poll(Math.max(timeout.toMillis, 0))
           if (!records.isEmpty) {
             val iterator = records.iterator()
             while (iterator.hasNext)
@@ -184,6 +189,9 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: Config, topic
           }
           else if (timeout.toMillis > 0)
             Try(onConsumerTimeout())
+          else
+            // Stagger poll requests to prevent processor saturation when timeout is 0
+            Thread.sleep(pollInterval)
 
           // Process records if batch is full or timeout is reached
           if (batch.size >= batchSize || Platform.currentTime - batchTimestamp >= timeout.toMillis) {

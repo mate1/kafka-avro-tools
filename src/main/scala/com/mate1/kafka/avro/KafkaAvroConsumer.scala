@@ -32,7 +32,7 @@ import scala.language.postfixOps
  * If any exceptions are thrown by the consume function then the offset of the current record
  * may or may not be committed (if auto-commit is not disabled) and the consumer will stop.
  */
-abstract class KafkaAvroConsumer[T <: SpecificRecord](config: Config, topic: String, timeout: Duration) extends KafkaAvroBatchConsumer[T](config, topic, 1, timeout) {
+abstract class KafkaAvroConsumer[T <: SpecificRecord](config: Config, topic: String, timeout: Duration = 0 millisecond) extends KafkaAvroBatchConsumer[T](config, topic, 1, timeout) {
 
   /**
    * Method that gets called each time a new record is ready for processing.

@@ -32,7 +32,7 @@ class KafkaAvroConsumerSpec extends UnitSpec with Zookeeper with Kafka with Sche
     val records = mutable.Buffer[TestRecord]()
     val topic = "TEST_LOG"
 
-    val consumer = new KafkaAvroConsumer[TestRecord](consumerConfig, topic, 0 millisecond) {
+    val consumer = new KafkaAvroConsumer[TestRecord](consumerConfig, topic) {
       override protected def consume(record: TestRecord): Unit = {
         records += record
       }
