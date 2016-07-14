@@ -234,6 +234,10 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: Config, topic
     if (!active.get()) {
       // Run the consumer in a new thread
       new Thread(this).start()
+
+      // Wait for the thread to have started
+      while (!active.get)
+        Try(Thread.sleep(10))
     }
   }
 
