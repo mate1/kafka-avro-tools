@@ -19,80 +19,90 @@
 package com.mate1.kafka.avro
 
 
-import com.mate1.kafka.avro.fixtures.{Config, Kafka, UnitSpec, Zookeeper}
+import com.mate1.kafka.avro.fixtures.{Config, Kafka, Zookeeper}
 import kafka.message.MessageAndMetadata
+import org.scalatest.WordSpec
 
-import scala.collection.mutable.MutableList
+import scala.collection.mutable
 import scala.compat.Platform
 import scala.concurrent.duration._
 
-class KafkaAvroBatchConsumerSpec extends UnitSpec with Zookeeper with Kafka with Config {
-
-  behavior of "The Kafka Avro batch consumer"
+class KafkaAvroBatchConsumerSpec extends WordSpec with Zookeeper with Kafka with Config {
 
   val config = loadConfig()
 
   val batchSize = 10
 
-  it should "consume a batch smaller than batchSize" in {
-    val arrivedBatch = MutableList(1)
+  "The Kafka Avro batch consumer" should {
 
-    val topic = "TEST_LOG"
+    "consume a batch smaller than batchSize" in {
+      val batches = mutable.Buffer[Seq[Long]]()
 
-    val consumer = new KafkaAvroBatchConsumer[TestRecord](AvroConsumerConfig(config.getConfig("consumer")), topic, (1 to batchSize).map(x => new TestRecord()), 3.seconds) {
-      override protected def consume(message: Seq[TestRecord]): Unit = {
-        arrivedBatch += message.size
+      val topic = "TEST_LOG"
+
+      val consumer = new KafkaAvroBatchConsumer[TestRecord](AvroConsumerConfig(config.getConfig("consumer")), topic, (1 to batchSize).map(x => new TestRecord()), 3.seconds) {
+        override protected def consume(records: Seq[TestRecord]): Unit = {
+          batches += records.map(_.getTestId.toLong)
+        }
+
+        final override protected def onConsumerFailure(e: Exception): Unit = { e.printStackTrace() }
+
+        final override protected def onDecodingFailure(e: Exception, message: MessageAndMetadata[Array[Byte], Array[Byte]]): Unit = {}
+
+        final override protected def onStart(): Unit = {}
+
+        final override protected def onStop(): Unit = {}
+
+        final override protected def onStopped(): Unit = {}
+
+        final override protected def onSchemaRepoFailure(schemaId: Short, e: Exception): Unit = { e.printStackTrace() }
       }
 
-      final override protected def onConsumerFailure(e: Exception): Unit = {}
+      val producer = new KafkaAvroProducer[TestRecord](AvroProducerConfig(config.getConfig("producer")), topic) {
 
-      final override protected def onDecodingFailure(e: Exception, message: MessageAndMetadata[Array[Byte], Array[Byte]]): Unit = {}
+        override protected def onClose(): Unit = {}
 
-      final override protected def onStart(): Unit = {}
+        override protected def onProducerFailure(e: Exception): Unit = { e.printStackTrace() }
 
-      final override protected def onStop(): Unit = {}
+        override protected def onSchemaRepoFailure(e: Exception): Unit = { e.printStackTrace() }
 
-      final override protected def onStopped(): Unit = {}
+        override protected def onEncodingFailure(e: Exception, message: TestRecord): Unit = { e.printStackTrace() }
+      }
 
-      final override protected def onSchemaRepoFailure(e: Exception): Unit = {}
+      val batch = (0 until 20).map(x => {
+        val record = new TestRecord()
+        record.setTestId(x.toLong)
+        record.setTimestamp(Platform.currentTime)
+        record
+      })
+
+      val (batch1, batch2) = batch.splitAt(6)
+      batch1.foreach(record => producer.publish(record))
+
+      consumer.start()
+
+      wait(6.seconds)
+
+      batch2.foreach(record => producer.publish(record))
+
+      wait(6.seconds)
+
+      consumer.stop()
+      consumer.waitUntilStopped()
+
+      assert(batches.size >= 2)
+      assert(batches.foldLeft(0)((result, records) => {
+        result + records.size
+      }) == 20)
+      assert(batches(0).size == 6)
+      assert(batches(1).size >= 10)
+
+      var matches = true
+      val records = batches.flatten
+      for (i <- records.indices) {
+        matches = matches && records(i) == i
+      }
+      assert(matches)
     }
-
-    val producer = new KafkaAvroProducer[TestRecord](AvroProducerConfig(config.getConfig("producer")), topic) {
-
-      override protected def onClose(): Unit = {}
-
-      override protected def onProducerFailure(e: Exception): Unit = {}
-
-      override protected def onSchemaRepoFailure(e: Exception): Unit = {}
-
-      override protected def onEncodingFailure(e: Exception, message: TestRecord): Unit = {}
-    }
-
-    val batch = (1 to 20).map(x => {
-      val record = new TestRecord()
-      record.setTestId(x.toLong)
-      record.setTimestamp(Platform.currentTime)
-      record
-    })
-
-    val (batchPart1, batchPart2) = batch.splitAt(6)
-    batchPart1.foreach(record => producer.publish(record))
-
-    val thread = new Thread(consumer)
-    thread.start()
-
-    wait(5.seconds)
-
-    batchPart2.foreach(record => producer.publish(record))
-
-    wait(4.seconds)
-
-    assert(arrivedBatch.size == 4)
-    assert(arrivedBatch(1) == 6)
-    assert(arrivedBatch(2) == 10)
-    assert(arrivedBatch(3) == 4)
-
-    thread.stop()
   }
-
 }

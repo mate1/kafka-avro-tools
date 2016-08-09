@@ -29,6 +29,7 @@ object Build extends Build {
     parallelExecution in ThisBuild := false,
     publishArtifact in packageDoc := false,
     publishArtifact in packageSrc := false,
+    publishArtifact in GlobalScope in Test := true,
     sources in doc := Seq.empty,
     sourcesInBase := false,
     resolvers ++= Seq(Resolver.mavenLocal,

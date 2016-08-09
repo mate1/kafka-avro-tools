@@ -21,8 +21,11 @@ package com.mate1.kafka.avro.fixtures
 import java.io.File
 import java.util.Properties
 
+import org.apache.commons.io.FileUtils
 import kafka.server.{KafkaConfig, KafkaServer}
 import org.scalatest.{BeforeAndAfterAll, Suite}
+
+import scala.concurrent.duration.Duration
 
 trait Kafka extends BeforeAndAfterAll { this: Suite =>
 
@@ -78,4 +81,14 @@ trait Kafka extends BeforeAndAfterAll { this: Suite =>
 
     super.afterAll()
   }
+
+  final def wait(duration: Duration): Unit = {
+    try {
+      Thread.sleep(duration.toMillis)
+    }
+    catch {
+      case e: Exception =>
+    }
+  }
+
 }

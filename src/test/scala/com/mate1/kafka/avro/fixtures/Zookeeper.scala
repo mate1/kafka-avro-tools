@@ -21,6 +21,7 @@ package com.mate1.kafka.avro.fixtures
 import java.io.File
 import java.net.InetSocketAddress
 
+import org.apache.commons.io.FileUtils
 import org.apache.zookeeper.server.{NIOServerCnxn, ZooKeeperServer}
 import org.scalatest.{BeforeAndAfterAll, Suite}
 
