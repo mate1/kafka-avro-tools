@@ -20,7 +20,6 @@ package com.mate1.kafka.avro
 
 
 import com.mate1.kafka.avro.fixtures.{Config, Kafka, Zookeeper}
-import kafka.message.MessageAndMetadata
 import org.scalatest.WordSpec
 
 import scala.collection.mutable
@@ -31,42 +30,31 @@ class KafkaAvroBatchConsumerSpec extends WordSpec with Zookeeper with Kafka with
 
   val config = loadConfig()
 
-  val batchSize = 10
-
   "The Kafka Avro batch consumer" should {
 
     "consume a batch smaller than batchSize" in {
       val batches = mutable.Buffer[Seq[Long]]()
 
-      val topic = "TEST_LOG"
+      val topic = this.getClass.getSimpleName
 
-      val consumer = new KafkaAvroBatchConsumer[TestRecord](AvroConsumerConfig(config.getConfig("consumer")), topic, (1 to batchSize).map(x => new TestRecord()), 3.seconds) {
+      val consumer = new KafkaAvroBatchConsumer[TestRecord](config.getConfig("consumer"), topic, 10, 3.seconds) {
         override protected def consume(records: Seq[TestRecord]): Unit = {
           batches += records.map(_.getTestId.toLong)
         }
 
         final override protected def onConsumerFailure(e: Exception): Unit = { e.printStackTrace() }
 
-        final override protected def onDecodingFailure(e: Exception, message: MessageAndMetadata[Array[Byte], Array[Byte]]): Unit = {}
-
         final override protected def onStart(): Unit = {}
 
         final override protected def onStop(): Unit = {}
 
         final override protected def onStopped(): Unit = {}
-
-        final override protected def onSchemaRepoFailure(schemaId: Short, e: Exception): Unit = { e.printStackTrace() }
       }
 
-      val producer = new KafkaAvroProducer[TestRecord](AvroProducerConfig(config.getConfig("producer")), topic) {
-
+      val producer = new KafkaAvroProducer[TestRecord](config.getConfig("producer"), topic) {
         override protected def onClose(): Unit = {}
 
         override protected def onProducerFailure(e: Exception): Unit = { e.printStackTrace() }
-
-        override protected def onSchemaRepoFailure(e: Exception): Unit = { e.printStackTrace() }
-
-        override protected def onEncodingFailure(e: Exception, message: TestRecord): Unit = { e.printStackTrace() }
       }
 
       val batch = (0 until 20).map(x => {

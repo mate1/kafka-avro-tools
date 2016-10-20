@@ -51,11 +51,13 @@ object Build extends Build {
         "org.apache.avro" % "avro" % "1.7.5",
         "org.apache.kafka" %% "kafka" % "0.8.1" exclude("javax.jms", "jms") exclude("com.sun.jdmk", "jmxtools") exclude("com.sun.jmx", "jmxri"),
         "org.apache.zookeeper" % "zookeeper" % "3.4.5-cdh4.2.1" exclude("junit", "junit"),
+        "org.scala-lang" % "scala-reflect" % "2.10.4",
 
         // Test dependencies
         "commons-io" % "commons-io" % "2.4" % Test,
+        "com.sun.jersey" % "jersey-core" % "1.15" % Test,
         "org.scalatest" %% "scalatest" % "2.2.1" % Test
-      )
+  )
     )
     .settings(avroSettings)
     .settings(sourceDirectory in avroConfig <<= (sourceDirectory in Test)(_ / "resources/avro"))

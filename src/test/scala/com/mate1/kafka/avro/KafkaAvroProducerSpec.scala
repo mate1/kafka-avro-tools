@@ -34,16 +34,12 @@ class KafkaAvroProducerSpec extends WordSpec with Zookeeper with Kafka with Conf
   "The Kafka Avro producer" should {
 
     "prefix messages with the proper magic bytes" in {
-      val topic = "MAIL_LOG"
+      val topic = this.getClass.getSimpleName
 
-      val producer = new KafkaAvroProducer[TestRecord](AvroProducerConfig(config.getConfig("producer")), topic) {
+      val producer = new KafkaAvroProducer[TestRecord](config.getConfig("producer"), topic) {
         override protected def onClose(): Unit = {}
 
         override protected def onProducerFailure(e: Exception): Unit = {}
-
-        override protected def onSchemaRepoFailure(e: Exception): Unit = {}
-
-        override protected def onEncodingFailure(e: Exception, message: TestRecord): Unit = {}
       }
       val record = new TestRecord()
       record.setTestId(Random.nextLong())
@@ -52,7 +48,7 @@ class KafkaAvroProducerSpec extends WordSpec with Zookeeper with Kafka with Conf
 
       wait(1 seconds)
 
-      val conf = AvroConsumerConfig(config.getConfig("consumer")).kafkaConsumerConfig()
+      val conf = AvroConsumerConfig(config.getConfig("consumer"))
       val iterator = Consumer.create(conf).createMessageStreams(Map(topic -> 1))(topic).head.iterator()
       val data = iterator.next().message()
 
@@ -61,9 +57,10 @@ class KafkaAvroProducerSpec extends WordSpec with Zookeeper with Kafka with Conf
         case 0 => "binary"
         case _ => ""
       }
+      info("Encoding: " + encoding)
 
       val schemaId = ((data(1) << 8) | (data(2) & 0xff)).toShort
-      println("Schema Id:" + schemaId)
+      info("Schema Id: " + schemaId)
 
       assert(encoding.nonEmpty)
     }

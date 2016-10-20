@@ -20,36 +20,49 @@ package com.mate1.kafka.avro
 
 import java.io.ByteArrayOutputStream
 
+import kafka.utils.VerifiableProperties
 import org.apache.avro.io.{BinaryEncoder, Encoder, EncoderFactory, JsonEncoder}
-import org.apache.avro.specific.{SpecificDatumWriter, SpecificRecord}
+import org.apache.avro.specific.{SpecificDatumWriter, SpecificRecordBase}
 
-import scala.reflect._
-import scala.util.{Failure, Success, Try}
+import scala.util.Try
 
 /**
  * Abstract class that provides Avro message to Kafka message encoding functionality.
  */
-abstract class AvroEncoder[T <: SpecificRecord](default_schema_id: Short, encoding: AvroEncoding.Value, schema_repo_url: String, topic: String)(implicit tag: ClassTag[T]) {
+class AvroEncoder[T <: SpecificRecordBase](props: VerifiableProperties) extends kafka.serializer.Encoder[T] {
 
-  /**
-   * Avro encoder.
-   */
-  private var encoder: Encoder = _
+  private val defaultSchemaId = Try(props.getString("avro.default_schema_id").toShort).getOrElse(0:Short)
 
-  /**
-   * Avro writer.
-   */
-  private val writer = new SpecificDatumWriter[T](tag.runtimeClass.asInstanceOf[Class[T]])
+  private var binaryEncoder: BinaryEncoder = _
 
-  /**
-   * Method that gets called when an error occurs while decoding a message.
-   */
-  protected def onEncodingFailure(e: Exception, message: T): Unit
+  private val encoding = props.getString("avro.encoding", "") match {
+    case "json" => AvroEncoding.JSON
+    case _ =>      AvroEncoding.Binary
+  }
 
-  /**
-   * Method that gets called when an error occurs while retrieving a schema from the repository.
-   */
-  protected def onSchemaRepoFailure(e: Exception): Unit
+  private var jsonEncoder: JsonEncoder = _
+
+  private val schemaRepo = Try(props.getString("avro.schema_repo_url")).filter(_.trim.nonEmpty).map(AvroSchemaRepository.apply).toOption
+
+  private val topic = Try(props.getString("avro.topic_name")).filter(_.trim.nonEmpty).toOption
+
+  private var writer: SpecificDatumWriter[T] = _
+
+  private final def getEncoder(message: T, out: ByteArrayOutputStream): Encoder = {
+    encoding match {
+      case AvroEncoding.Binary =>
+        binaryEncoder = EncoderFactory.get().binaryEncoder(out, binaryEncoder)
+        binaryEncoder
+      case AvroEncoding.JSON =>
+        jsonEncoder match {
+          case oldEncoder: JsonEncoder =>
+            oldEncoder.configure(out)
+          case _ =>
+            jsonEncoder = EncoderFactory.get().jsonEncoder(message.getSchema, out)
+            jsonEncoder
+        }
+    }
+  }
 
   /**
    * Serializes an Avro message into binary data that can be published into Kafka.
@@ -57,38 +70,13 @@ abstract class AvroEncoder[T <: SpecificRecord](default_schema_id: Short, encodi
    * @param message the message to be published
    * @return a byte array containing the serialized message
    */
-  protected final def serializeMessage(message: T): Option[Array[Byte]] = Try {
-    // Configure encoder
+  final override def toBytes(message: T) : Array[Byte] = {
+    // Initialize encoder & output stream
     val out = new ByteArrayOutputStream()
-    encoder match {
-      case oldEncoder: BinaryEncoder =>
-        encoder = EncoderFactory.get().binaryEncoder(out, oldEncoder)
-      case oldEncoder: JsonEncoder =>
-        encoder = oldEncoder.configure(out)
-      case _ =>
-        encoding match {
-          case AvroEncoding.Binary =>
-            encoder = EncoderFactory.get().binaryEncoder(out, null)
-          case AvroEncoding.JSON =>
-            encoder = EncoderFactory.get().jsonEncoder(message.getSchema, out)
-        }
-    }
+    val encoder = getEncoder(message, out)
 
     // Try to retrieve the schema's version from the repository
-    val schemaId = schema_repo_url match {
-      case repoUrl: String if repoUrl.trim.nonEmpty =>
-        Try(AvroSchemaRepository(schema_repo_url).getSchemaId(topic, message.getSchema).get) match {
-          case Failure(e: Exception) =>
-            onSchemaRepoFailure(e)
-            default_schema_id
-          case Failure(e: Throwable) =>
-            throw e
-          case Success(id: Short) =>
-            id
-        }
-      case _ =>
-        default_schema_id
-    }
+    val schemaId = schemaRepo.flatMap(repo => topic.flatMap(repo.getSchemaId(_, message.getSchema))).getOrElse(defaultSchemaId)
 
     // Write the magic byte and schema version
     out.write(encoding.id)
@@ -96,18 +84,12 @@ abstract class AvroEncoder[T <: SpecificRecord](default_schema_id: Short, encodi
     out.write(schemaId & 0x00FF)
 
     // Encode and write the message
+    if (writer == null)
+      writer = new SpecificDatumWriter[T](message.getSchema)
     writer.write(message, encoder)
     encoder.flush()
 
-    Some(out.toByteArray)
-  } match {
-    case Failure(e: Exception) =>
-      onEncodingFailure(e, message)
-      None
-    case Failure(e: Throwable) =>
-      throw e
-    case Success(result: Option[Array[Byte]]) =>
-      result
+    out.toByteArray
   }
 
 }

@@ -20,19 +20,18 @@ package com.mate1.kafka.avro
 
 import java.util.concurrent.atomic.AtomicBoolean
 
+import com.typesafe.config.Config
 import kafka.producer.{KeyedMessage, Producer}
-import org.apache.avro.specific.SpecificRecord
+import org.apache.avro.specific.SpecificRecordBase
 
 import scala.reflect._
-import scala.util.{Failure, Success, Try}
 
 /**
  * A Kafka producer implementation that publishes Avro messages unto a topic.
  *
  * Some magic bytes that specify the encoding format and the version of the schema used will be written before each message's data.
  */
-abstract class KafkaAvroProducer[T <: SpecificRecord](config: AvroProducerConfig, topic: String)(implicit tag: ClassTag[T])
-  extends AvroEncoder[T](config.default_schema_id, config.encoding, config.schema_repo_url, topic) {
+abstract class KafkaAvroProducer[T <: SpecificRecordBase](config: Config, topic: String)(implicit tag: ClassTag[T]) {
 
   /**
    * Whether the producer was closed.
@@ -42,12 +41,16 @@ abstract class KafkaAvroProducer[T <: SpecificRecord](config: AvroProducerConfig
   /**
    * Kafka producer.
    */
-  private var producer: Option[Producer[String, Array[Byte]]] = None
+  private var producer: Option[Producer[String, T]] = None
 
   /**
    * Kafka producer config.
    */
-  private val producerConfig = config.kafkaProducerConfig()
+  private val producerConfig = AvroProducerConfig(config, Map[String, String](
+    "avro.topic_name" -> topic,
+    "key.serializer.class" -> "kafka.serializer.StringEncoder",
+    "serializer.class" -> "com.mate1.kafka.avro.AvroEncoder"
+  ))
 
   /**
    * Close this producer, preventing further messages from being published.
@@ -82,32 +85,24 @@ abstract class KafkaAvroProducer[T <: SpecificRecord](config: AvroProducerConfig
    * @param message the message to be published
    * @return true if the message was published successfully, false otherwise
    */
-  final def publish(message: T): Boolean = Try {
+  final def publish(message: T): Boolean = try {
     if (!closed.get()) {
       // Serialize and queue the message on the broker
-      val data = serializeMessage(message)
-      if (data.isDefined) {
-        if (producer.isEmpty)
-          producer = Some(new Producer[String, Array[Byte]](producerConfig))
-        producer.get.send(new KeyedMessage(topic, data.get))
-        true
-      }
-      else
-        false
+      if (producer.isEmpty)
+        producer = Some(new Producer[String, T](producerConfig))
+      producer.get.send(new KeyedMessage(topic, message))
+      true
     }
     else
       false
-  } match {
-    case Failure(e: Exception) =>
+  }
+  catch {
+    case e: Exception =>
       onProducerFailure(e)
       if (producer.isDefined)
         producer.get.close()
       producer = None
       false
-    case Failure(e: Throwable) =>
-      throw e
-    case Success(result) =>
-      result
   }
 
 }

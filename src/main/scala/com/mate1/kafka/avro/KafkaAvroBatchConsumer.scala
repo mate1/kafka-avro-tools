@@ -20,15 +20,17 @@ package com.mate1.kafka.avro
 
 import java.util.concurrent.atomic.AtomicBoolean
 
+import com.typesafe.config.Config
 import kafka.consumer.{Consumer, ConsumerConfig, ConsumerConnector, ConsumerTimeoutException}
-import org.apache.avro.specific.SpecificRecord
+import kafka.serializer.StringDecoder
+import org.apache.avro.specific.SpecificRecordBase
 
 import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.compat.Platform
 import scala.concurrent.duration.Duration
 import scala.reflect.ClassTag
-import scala.util.{Failure, Try}
+import scala.util.Try
 
 /**
  * A Kafka consumer implementation that reads several Avro messages from the topic into a batch before processing them.
@@ -41,8 +43,7 @@ import scala.util.{Failure, Try}
  *
  * If any exceptions are thrown by the consume function then the offsets will not be committed and the consumer will stop.
  */
-abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerConfig, topic: String, messages: Seq[T], timeout: Duration)(implicit tag: ClassTag[T])
-  extends AvroDecoder[T](config.schema_repo_url, topic) with Runnable {
+abstract class KafkaAvroBatchConsumer[T >: Null <: SpecificRecordBase](config: Config, topic: String, batchSize: Int, timeout: Duration)(implicit tag: ClassTag[T]) extends Runnable {
 
   /**
    * Whether this consumer thread is still running.
@@ -67,15 +68,16 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
   /**
    * Kafka consumer config.
    */
-  private val consumerConfig = config.kafkaConsumerConfig(Seq[(String,String)](
+  private val consumerConfig = AvroConsumerConfig(config, Seq[(String,String)](
+    "avro.topic_name" -> topic,
     // Force disable auto commit if batch size is greater than 1, because we will manually commit after each batch
-    if (messages.size > 1)
+    if (batchSize > 1)
       "auto.commit.enable" -> "false"
     else
       null
     ,
     // Force consumer timeout if batch size is greater than 1, because we want the stream iterator to timeout periodically to check the time since last consume
-    if (messages.size > 1 && Try(config.conf.getString("consumer.timeout.ms").toLong).filter(_ > 0).isFailure)
+    if (batchSize > 1 && Try(config.getString("consumer.timeout.ms").toLong).filter(_ > 0).isFailure)
       "consumer.timeout.ms" -> Math.max(timeout.toMillis/10,200).toString
     else
       null
@@ -141,7 +143,7 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
    */
   @Override
   final def run(): Unit = {
-    Try {
+    try {
       // Update status
       active.set(true)
 
@@ -151,46 +153,40 @@ abstract class KafkaAvroBatchConsumer[T <: SpecificRecord](config: AvroConsumerC
       // Start the consumer
       onStart()
 
-      // Initialize message iterator
-      val iterator = consumer.createMessageStreams(Map(topic -> 1))(topic).head.iterator()
+      // Initialize message stream iterator
+      val iterator = consumer.createMessageStreams(Map(topic -> 1), new StringDecoder(), new AvroDecoder[T](consumerConfig.props))(topic).head.iterator()
       batchTimestamp = Platform.currentTime
       while (!stopped.get) {
         // Get the next message and de-serialize it
-        Try {
+        try {
           if (iterator.hasNext())
-            deserializeMessage(iterator.next(), messages(batch.size)) match {
-              case Some(msg: T) =>
-                batch += msg
-              case _ =>
-            }
-        } match {
-          case Failure(e: ConsumerTimeoutException) if messages.size > 1 =>
+            batch += iterator.next().message()
+        }
+        catch {
+          case e: ConsumerTimeoutException if batchSize > 1 =>
             // Ignore consumer timeouts while batching
-          case Failure(e: Throwable) =>
-            throw e
-          case _ =>
         }
 
-        if (batch.size >= messages.size || Platform.currentTime - batchTimestamp > timeout.toMillis) {
+        if (batch.size >= batchSize || Platform.currentTime - batchTimestamp > timeout.toMillis) {
           if (batch.nonEmpty) {
             consume(batch)
-            if (messages.size > 1)
+            if (batchSize > 1)
               commitOffsets()
             batch.clear()
           }
           batchTimestamp = Platform.currentTime
         }
       }
-    } match {
-      case Failure(e: Exception) =>
+    }
+    catch {
+      case e: Exception =>
         if (!e.isInstanceOf[ConsumerTimeoutException])
           onConsumerFailure(e)
         // Stop the consumer
         stop()
-      case Failure(e: Throwable) =>
+      case e: Throwable =>
         // Stop the consumer
         stop()
-      case _ =>
     }
 
     // Terminate the consumer

@@ -25,33 +25,20 @@ import com.typesafe.config.{Config, ConfigFactory, ConfigValue}
 import kafka.consumer.ConsumerConfig
 
 import scala.collection.JavaConverters._
-import scala.util.Try
 
 /**
  * Avro consumer configuration, instantiated from a Typesafe Config object containing the
  * standard Kafka consumer configuration keys + some extra keys specific to Avro.
  */
-case class AvroConsumerConfig private (conf: Config, schema_repo_url: String) {
-  final def kafkaConsumerConfig(overrides: Map[String,String] = Map.empty[String,String]): ConsumerConfig = {
+object AvroConsumerConfig {
+  final def apply(conf: Config, overrides: Map[String,String] = Map.empty[String,String]): ConsumerConfig = {
     // Apply overrides to config, if any
     val config = if (overrides.nonEmpty) ConfigFactory.parseMap(overrides.asJava).withFallback(conf) else conf
 
     // Generate Kafka consumer config
     val props = new Properties()
-    for (entry: Entry[String, ConfigValue] <- config.entrySet.asScala) {
-      if (!entry.getKey.startsWith("avro"))
-        props.put(entry.getKey, entry.getValue.unwrapped.toString)
-    }
+    for (entry: Entry[String, ConfigValue] <- config.entrySet.asScala)
+      props.put(entry.getKey, entry.getValue.unwrapped.toString)
     new ConsumerConfig(props)
-  }
-}
-
-object AvroConsumerConfig {
-  final def apply(conf: Config): AvroConsumerConfig = {
-    // Read Avro consumer specific config
-    val schema_repo_url = Try(conf.getString("avro.schema_repo_url")).getOrElse("")
-
-    // Generate Avro consumer config
-    new AvroConsumerConfig(conf, schema_repo_url)
   }
 }
