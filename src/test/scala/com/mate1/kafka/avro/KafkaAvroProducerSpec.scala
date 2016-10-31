@@ -49,8 +49,10 @@ class KafkaAvroProducerSpec extends WordSpec with Zookeeper with Kafka with Conf
       wait(1 seconds)
 
       val conf = AvroConsumerConfig(config.getConfig("consumer"))
-      val iterator = Consumer.create(conf).createMessageStreams(Map(topic -> 1))(topic).head.iterator()
+      val consumer = Consumer.create(conf)
+      val iterator = consumer.createMessageStreams(Map(topic -> 1))(topic).head.iterator()
       val data = iterator.next().message()
+      consumer.shutdown()
 
       val encoding = data(0) match {
         case 1 => "json"
