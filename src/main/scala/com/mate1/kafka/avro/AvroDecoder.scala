@@ -18,6 +18,8 @@
 
 package com.mate1.kafka.avro
 
+import java.util.logging.{Level, Logger}
+
 import kafka.utils.VerifiableProperties
 import org.apache.avro.Schema
 import org.apache.avro.io.{BinaryDecoder, Decoder, DecoderFactory, JsonDecoder}
@@ -36,6 +38,8 @@ class AvroDecoder[T >: Null <: SpecificRecordBase](props: VerifiableProperties)(
   private var binaryDecoder: BinaryDecoder = _
 
   private val jsonDecoders = mutable.Map[Short, JsonDecoder]()
+
+  private val logger = Logger.getLogger(this.getClass.getCanonicalName)
 
   private val messageConstructor = {
     val mirror = universe.runtimeMirror(getClass.getClassLoader)
@@ -79,19 +83,26 @@ class AvroDecoder[T >: Null <: SpecificRecordBase](props: VerifiableProperties)(
    * @return a MailMessage if decoded successfully, None otherwise
    */
   override def fromBytes(data: Array[Byte]): T = {
-    val message = messageConstructor().asInstanceOf[T]
+    try {
+      val message = messageConstructor().asInstanceOf[T]
 
-    // Read the encoding and schema id
-    val encoding = AvroEncoding(data(0))
-    val schemaId = ((data(1) << 8) | (data(2) & 0xff)).toShort
+      // Read the encoding and schema id
+      val encoding = AvroEncoding(data(0))
+      val schemaId = ((data(1) << 8) | (data(2) & 0xff)).toShort
 
-    // Retrieve the writer's schema from the Avro schema repository
-    val schema = schemaRepo.flatMap(repo => topic.flatMap(repo.getSchema(_, schemaId))).getOrElse(message.getSchema)
+      // Retrieve the writer's schema from the Avro schema repository
+      val schema = schemaRepo.flatMap(repo => topic.flatMap(repo.getSchema(_, schemaId))).getOrElse(message.getSchema)
 
-    // Decode the message
-    if (reader == null)
-      reader = new SpecificDatumReader[T](message.getSchema)
-    reader.setSchema(schema)
-    reader.read(message, getDecoder(data, encoding, schema, schemaId))
+      // Decode the message
+      if (reader == null)
+        reader = new SpecificDatumReader[T](message.getSchema)
+      reader.setSchema(schema)
+      reader.read(message, getDecoder(data, encoding, schema, schemaId))
+    }
+    catch {
+      case e: Exception =>
+        logger.log(Level.SEVERE, "Failed to decode an Avro message", e)
+        throw e
+    }
   }
 }

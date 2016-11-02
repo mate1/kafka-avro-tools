@@ -19,6 +19,7 @@
 package com.mate1.kafka.avro
 
 import java.io.ByteArrayOutputStream
+import java.util.logging.{Level, Logger}
 
 import kafka.utils.VerifiableProperties
 import org.apache.avro.io.{BinaryEncoder, Encoder, EncoderFactory, JsonEncoder}
@@ -41,6 +42,8 @@ class AvroEncoder[T <: SpecificRecordBase](props: VerifiableProperties) extends 
   }
 
   private var jsonEncoder: JsonEncoder = _
+
+  private val logger = Logger.getLogger(this.getClass.getCanonicalName)
 
   private val schemaRepo = Try(props.getString("avro.schema_repo_url")).filter(_.trim.nonEmpty).map(AvroSchemaRepository.apply).toOption
 
@@ -71,25 +74,32 @@ class AvroEncoder[T <: SpecificRecordBase](props: VerifiableProperties) extends 
    * @return a byte array containing the serialized message
    */
   final override def toBytes(message: T) : Array[Byte] = {
-    // Initialize encoder & output stream
-    val out = new ByteArrayOutputStream()
-    val encoder = getEncoder(message, out)
+    try {
+      // Initialize encoder & output stream
+      val out = new ByteArrayOutputStream()
+      val encoder = getEncoder(message, out)
 
-    // Try to retrieve the schema's version from the repository
-    val schemaId = schemaRepo.flatMap(repo => topic.flatMap(repo.getSchemaId(_, message.getSchema))).getOrElse(defaultSchemaId)
+      // Try to retrieve the schema's version from the repository
+      val schemaId = schemaRepo.flatMap(repo => topic.flatMap(repo.getSchemaId(_, message.getSchema))).getOrElse(defaultSchemaId)
 
-    // Write the magic byte and schema version
-    out.write(encoding.id)
-    out.write(schemaId >> 8)
-    out.write(schemaId & 0x00FF)
+      // Write the magic byte and schema version
+      out.write(encoding.id)
+      out.write(schemaId >> 8)
+      out.write(schemaId & 0x00FF)
 
-    // Encode and write the message
-    if (writer == null)
-      writer = new SpecificDatumWriter[T](message.getSchema)
-    writer.write(message, encoder)
-    encoder.flush()
+      // Encode and write the message
+      if (writer == null)
+        writer = new SpecificDatumWriter[T](message.getSchema)
+      writer.write(message, encoder)
+      encoder.flush()
 
-    out.toByteArray
+      out.toByteArray
+    }
+    catch {
+      case e: Exception =>
+        logger.log(Level.SEVERE, "Failed to encode an Avro message", e)
+        throw e
+    }
   }
 
 }
