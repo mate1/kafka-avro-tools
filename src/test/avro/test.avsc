@@ -1,0 +1,15 @@
+{
+    "namespace": "com.mate1.kafka.avro",
+    "name": "TestRecord",
+    "type": "record",
+    "fields": [
+        {
+            "name": "id",
+            "type": "long"
+        },
+        {
+            "name": "timestamp",
+            "type": "long"
+        }
+    ]
+}

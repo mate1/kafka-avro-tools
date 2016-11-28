@@ -13,12 +13,7 @@
    See the License for the specific language governing permissions and
    limitations under the License.
 */
-
-resolvers ++= Seq(
-  "Sonatype OSS Snapshots" at "http://oss.sonatype.org/content/repositories/snapshots/",
-  "Typesafe Repository" at "http://repo.typesafe.com/typesafe/releases/",
-  "sbt-plugin-releases" at "http://repo.scala-sbt.org/scalasbt/sbt-plugin-releases"
-)
+logLevel := Level.Warn
 
 addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "0.13.0")
 

@@ -56,7 +56,7 @@ class KafkaAvroConsumerSpec extends UnitSpec with Zookeeper with Kafka with Sche
 
     for (i <- 0 until 20) {
       val record = new TestRecord()
-      record.setTestId(i.toLong)
+      record.setId(i.toLong)
       record.setTimestamp(Platform.currentTime)
       producer.publish(record, topic)
     }
@@ -72,7 +72,7 @@ class KafkaAvroConsumerSpec extends UnitSpec with Zookeeper with Kafka with Sche
 
     var matches = true
     for (i <- records.indices) {
-      matches = matches && records(i).getTestId == i
+      matches = matches && records(i).getId == i
     }
     assert(matches)
   }

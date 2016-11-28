@@ -56,7 +56,7 @@ class KafkaAvroBatchConsumerSpec extends UnitSpec with Zookeeper with Kafka with
 
     val batch = (0 until 20).map(x => {
       val record = new TestRecord()
-      record.setTestId(x.toLong)
+      record.setId(x.toLong)
       record.setTimestamp(Platform.currentTime)
       record
     })
@@ -83,7 +83,7 @@ class KafkaAvroBatchConsumerSpec extends UnitSpec with Zookeeper with Kafka with
     var matches = true
     val records = batches.flatten
     for (i <- records.indices) {
-      matches = matches && records(i).getTestId == i
+      matches = matches && records(i).getId == i
     }
     assert(matches)
   }
